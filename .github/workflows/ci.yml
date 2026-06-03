@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+      OPENAI_API_KEY: sk-ci-placeholder-key-000000000000
+      OPENAI_FILTER_MODEL: gpt-4o-mini
+      OPENAI_DRAFT_MODEL: gpt-4o
+      GMAIL_USER: ci@example.com
+      GMAIL_APP_PASSWORD: abcdefghijklmnop
+      CRON_SECRET: ci-cron-secret-12345
+      ADMIN_TOKEN: ci-admin-token-12345
+      BUSINESS_NAME: TalentBridge
+      BUSINESS_ADDRESS: 123 CI Street
+      CONTACT_EMAIL: contact@talentbridge.example
+      UNSUBSCRIBE_MAILTO: unsubscribe@talentbridge.example
+      UNSUBSCRIBE_URL: https://talentbridge.example/unsubscribe
+      DRY_RUN: "true"
+      AGENT_ENABLED: "true"
+      DAILY_EMAIL_LIMIT: "100"
+      ENABLE_PATTERN_GUESSING: "false"
+      ALLOW_LOW_CONFIDENCE_SEND: "false"
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      - run: pnpm typecheck
+
+      - run: pnpm test:coverage
+
+      - name: Check agent/scraper coverage
+        run: |
+          node -e "
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('coverage/coverage-summary.json','utf8'));
+          const paths=['src/lib/agent/','src/lib/scrapers/'];
+          for (const [k,v] of Object.entries(p)) {
+            if (paths.some(pr=>k.includes(pr.replace(/\\//g,'\\\\')))) {
+              if (v.lines.pct<80) { console.error('Coverage below 80%:',k,v.lines.pct); process.exit(1); }
+            }
+          }
+          "
+
+      - name: Build
+        run: pnpm build
+        env:
+          SKIP_ENV_VALIDATION: "true"
+
+      - name: Secret grep
+        run: |
+          if [ -d .next ]; then
+            if rg -l "sk-ci-placeholder|GMAIL_APP_PASSWORD=abcdefghij|DATABASE_URL=postgres" .next 2>/dev/null; then
+              echo "Secrets found in build output"
+              exit 1
+            fi
+          fi

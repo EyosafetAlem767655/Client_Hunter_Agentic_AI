@@ -1,0 +1,46 @@
+export type JobSource = "remoteok" | "weworkremotely" | "hn";
+
+export interface RawPosting {
+  source: JobSource;
+  externalId: string;
+  url: string;
+  title: string;
+  company: string;
+  location: string;
+  description: string;
+  postedAt: Date | null;
+  raw: Record<string, unknown>;
+}
+
+export type ContactSourceType = "listed" | "pattern_guessed" | "scraped_from_site";
+
+export interface DiscoveredContact {
+  email: string;
+  sourceType: ContactSourceType;
+  confidence: number;
+}
+
+export type OutreachStatus =
+  | "pending"
+  | "approved"
+  | "sent"
+  | "failed"
+  | "bounced"
+  | "replied";
+
+export type AgentRunType = "scrape" | "outreach" | "filter" | "discover";
+export type AgentRunStatus = "running" | "completed" | "failed";
+export type EventLevel = "info" | "warn" | "error";
+
+export interface GuardrailResult {
+  ok: boolean;
+  reason?: string;
+}
+
+export interface PipelineSummary {
+  runId: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  durationMs: number;
+}

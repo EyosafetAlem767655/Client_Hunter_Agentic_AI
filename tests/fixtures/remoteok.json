@@ -1,0 +1,13 @@
+[
+  { "legal": "Remote OK API terms" },
+  {
+    "id": "123",
+    "slug": "senior-engineer-acme",
+    "url": "https://remoteok.com/remote-jobs/123",
+    "position": "Senior Engineer",
+    "company": "Acme Corp",
+    "location": "Remote",
+    "description": "Build APIs. Contact hiring@acme.com",
+    "date": "2026-06-01"
+  }
+]

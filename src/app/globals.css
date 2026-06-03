@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 96%;
+    --card: 222 40% 10%;
+    --card-foreground: 210 40% 96%;
+    --primary: 262 83% 58%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 217 33% 14%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 262 50% 20%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 20%;
+    --input: 217 33% 18%;
+    --ring: 262 83% 58%;
+    --radius: 0.75rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-height: 100vh;
+  }
+}
+
+.mesh-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: hsl(var(--background));
+}
+
+.mesh-bg::before,
+.mesh-bg::after {
+  content: "";
+  position: absolute;
+  width: 60vw;
+  height: 60vw;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.35;
+  animation: mesh-drift 18s ease-in-out infinite alternate;
+}
+
+.mesh-bg::before {
+  background: radial-gradient(circle, hsl(262 83% 45%) 0%, transparent 70%);
+  top: -10%;
+  left: -10%;
+}
+
+.mesh-bg::after {
+  background: radial-gradient(circle, hsl(199 89% 40%) 0%, transparent 70%);
+  bottom: -20%;
+  right: -10%;
+  animation-delay: -9s;
+}
+
+@keyframes mesh-drift {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(5%, 8%) scale(1.1);
+  }
+}
+
+.glass-card {
+  @apply rounded-xl border border-white/10 bg-card/40 backdrop-blur-xl shadow-xl;
+}
