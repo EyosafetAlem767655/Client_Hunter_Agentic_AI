@@ -48,20 +48,9 @@ jobs:
 
       - run: pnpm typecheck
 
+      # Coverage thresholds (80% lines/statements on agent + scrapers) are enforced
+      # by vitest.config.ts when this step runs; no separate summary file needed.
       - run: pnpm test:coverage
-
-      - name: Check agent/scraper coverage
-        run: |
-          node -e "
-          const fs=require('fs');
-          const p=JSON.parse(fs.readFileSync('coverage/coverage-summary.json','utf8'));
-          const paths=['src/lib/agent/','src/lib/scrapers/'];
-          for (const [k,v] of Object.entries(p)) {
-            if (paths.some(pr=>k.includes(pr.replace(/\\//g,'\\\\')))) {
-              if (v.lines.pct<80) { console.error('Coverage below 80%:',k,v.lines.pct); process.exit(1); }
-            }
-          }
-          "
 
       - name: Build
         run: pnpm build

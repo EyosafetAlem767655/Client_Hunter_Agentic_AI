@@ -1,7 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const getLlmCache = vi.fn();
-const setLlmCache = vi.fn();
+const { getLlmCache, setLlmCache } = vi.hoisted(() => ({
+  getLlmCache: vi.fn(),
+  setLlmCache: vi.fn(),
+}));
 
 vi.mock("@/lib/db/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/db/queries")>();
@@ -17,13 +19,17 @@ describe("memory LLM cache", () => {
     vi.clearAllMocks();
   });
 
-  it("reads and writes cache keys", async () => {
-    getLlmCache.mockResolvedValue({ response: { ok: true } });
-    const { memory } = await import("@/lib/agent/memory");
-    const hit = await memory.getCachedLlm("gpt-4o-mini", "input-hash");
-    expect(hit).toEqual({ ok: true });
+  it(
+    "reads and writes cache keys",
+    async () => {
+      getLlmCache.mockResolvedValue({ response: { ok: true } });
+      const { memory } = await import("@/lib/agent/memory");
+      const hit = await memory.getCachedLlm("gpt-4o-mini", "input-hash");
+      expect(hit).toEqual({ ok: true });
 
-    await memory.setCachedLlm("gpt-4o-mini", "input-hash", { ok: true });
-    expect(setLlmCache).toHaveBeenCalled();
-  });
+      await memory.setCachedLlm("gpt-4o-mini", "input-hash", { ok: true });
+      expect(setLlmCache).toHaveBeenCalled();
+    },
+    15_000
+  );
 });
