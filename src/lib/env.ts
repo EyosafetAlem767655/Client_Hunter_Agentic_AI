@@ -91,8 +91,10 @@ function loadEnv(): Env {
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
     if (process.env.SKIP_ENV_VALIDATION === "true") {
-      normalizeEnv({
-        ...process.env,
+      // Build-time fallback: write placeholder values directly into process.env
+      // so the second parse succeeds. These are NEVER used at runtime — Vercel
+      // injects real env vars and loadEnv() runs again per cold start.
+      const placeholders: Record<string, string> = {
         DATABASE_URL:
           resolveDatabaseUrl(process.env) || "postgres://local/build",
         OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "sk-build-placeholder",
@@ -114,7 +116,11 @@ function loadEnv(): Env {
         UNSUBSCRIBE_URL:
           process.env.UNSUBSCRIBE_URL ??
           "https://talentbridge.example/unsubscribe",
-      });
+      };
+      for (const [k, v] of Object.entries(placeholders)) {
+        if (!process.env[k]) process.env[k] = v;
+      }
+      normalizeEnv();
       return envSchema.parse(process.env);
     }
     const formatted = parsed.error.flatten().fieldErrors;

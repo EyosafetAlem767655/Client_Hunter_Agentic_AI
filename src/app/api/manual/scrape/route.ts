@@ -4,6 +4,7 @@ import { verifyManualAuth } from "@/lib/auth";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   if (!verifyManualAuth(request)) {
@@ -16,6 +17,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const summary = await runScrapePipeline();
-  return NextResponse.json(summary);
+  try {
+    const summary = await runScrapePipeline();
+    return NextResponse.json({ ok: true, ...summary });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json(
+      { ok: false, error: message },
+      { status: 500 }
+    );
+  }
 }

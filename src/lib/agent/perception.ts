@@ -1,7 +1,11 @@
+import { runNodeScrapers } from "@/lib/scraper/node-runner";
 import { runPythonScrapers } from "@/lib/scraper/python-client";
 import type { RawPosting } from "@/types";
 import { filterNewPostings, memory } from "./memory";
 import { logEvent } from "./observability";
+import { filterVaPostings } from "./va-filter";
+
+type Engine = "node" | "python";
 
 export async function ingestPostings(
   postings: RawPosting[]
@@ -15,30 +19,93 @@ export async function ingestPostings(
   return { scraped: postings.length, inserted };
 }
 
+function pickEngine(): Engine {
+  // On Vercel the Node-native scrapers are far more reliable than the Python
+  // self-fetch path (no extra serverless cold-start, no inter-function HTTP).
+  if (process.env.VERCEL === "1") return "node";
+  // Allow opt-in for local Python testing
+  if (process.env.SCRAPER_ENGINE === "python") return "python";
+  // Default to Node everywhere — Python is now a fallback.
+  return "node";
+}
+
 export async function runPerception(limit: number): Promise<{
   scraped: number;
   inserted: number;
-  engine: "python";
+  engine: Engine;
+  sources: Array<{ source: string; ok: boolean; count?: number; error?: string }>;
 }> {
-  await logEvent("info", "Starting Python scrapers");
+  const engine = pickEngine();
+  await logEvent("info", `Starting ${engine} scrapers`);
 
-  const result = await runPythonScrapers(limit);
+  let result: {
+    postings: RawPosting[];
+    scraped: number;
+    sources: Array<{ source: string; ok: boolean; count?: number; error?: string }>;
+  };
 
-  for (const source of result.sources) {
-    if (source.ok) {
-      await logEvent("info", `Python scraper ${source.source} returned ${source.count ?? 0} postings`);
+  try {
+    if (engine === "node") {
+      result = await runNodeScrapers(limit);
     } else {
-      const isRateLimit =
-        source.error?.includes("403") || source.error?.includes("429");
-      await logEvent(isRateLimit ? "warn" : "error", `Python scraper ${source.source} failed`, {
-        error: source.error,
+      result = await runPythonScrapers(limit);
+    }
+  } catch (primaryError) {
+    const message =
+      primaryError instanceof Error ? primaryError.message : String(primaryError);
+    await logEvent("warn", `${engine} scraper failed, attempting fallback`, {
+      error: message,
+    });
+    // Fallback: try the other engine before giving up
+    try {
+      result =
+        engine === "node"
+          ? await runPythonScrapers(limit)
+          : await runNodeScrapers(limit);
+    } catch (fallbackError) {
+      const fbMessage =
+        fallbackError instanceof Error
+          ? fallbackError.message
+          : String(fallbackError);
+      await logEvent("error", "All scrapers failed", {
+        primary: message,
+        fallback: fbMessage,
       });
+      throw fallbackError;
     }
   }
 
-  const { scraped, inserted } = await ingestPostings(result.postings);
+  for (const source of result.sources) {
+    if (source.ok) {
+      await logEvent(
+        "info",
+        `${engine} scraper ${source.source} returned ${source.count ?? 0} postings`
+      );
+    } else {
+      const isRateLimit =
+        source.error?.includes("403") || source.error?.includes("429");
+      await logEvent(
+        isRateLimit ? "warn" : "error",
+        `${engine} scraper ${source.source} failed`,
+        { error: source.error }
+      );
+    }
+  }
 
-  await logEvent("info", "Python scrape complete", { scraped, inserted });
+  // Filter for Virtual Assistant / customer-support roles aimed at US/Europe.
+  const vaPostings = filterVaPostings(result.postings);
+  await logEvent("info", "VA pre-filter complete", {
+    total: result.postings.length,
+    matched: vaPostings.length,
+  });
 
-  return { scraped, inserted, engine: "python" };
+  const { scraped, inserted } = await ingestPostings(vaPostings);
+
+  await logEvent("info", `${engine} scrape complete`, {
+    scraped,
+    inserted,
+    totalFetched: result.postings.length,
+  });
+
+  return { scraped, inserted, engine, sources: result.sources };
 }

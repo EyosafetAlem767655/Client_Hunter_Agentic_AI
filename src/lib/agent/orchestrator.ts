@@ -12,6 +12,7 @@ import { memory } from "./memory";
 import { runPerception } from "./perception";
 import { filterPendingPostings } from "./reasoning";
 import { setRunId, logEvent } from "./observability";
+import { sendDailyDigest } from "@/lib/email/digest";
 import type { RawPosting } from "@/types";
 import type { PipelineSummary } from "@/types";
 
@@ -43,12 +44,19 @@ export async function runScrapePipelineFromPostings(
   let failed = 0;
 
   try {
-    let perception: { scraped: number; inserted: number; engine?: string };
+    let perception: {
+      scraped: number;
+      inserted: number;
+      engine?: string;
+      sources?: Array<{ source: string; ok: boolean; count?: number; error?: string }>;
+    };
 
     if (preloadedPostings) {
       const { ingestPostings } = await import("./perception");
-      const ingested = await ingestPostings(preloadedPostings);
-      perception = { ...ingested, engine: "python-ingest" };
+      const { filterVaPostings } = await import("./va-filter");
+      const vaOnly = filterVaPostings(preloadedPostings);
+      const ingested = await ingestPostings(vaOnly);
+      perception = { ...ingested, engine: "preloaded" };
     } else {
       perception = await runPerception(CRON_POSTING_LIMIT);
     }
@@ -64,10 +72,15 @@ export async function runScrapePipelineFromPostings(
     succeeded += discovered;
     processed += discovered;
 
+    // Send the daily digest to CONTACT_EMAIL summarising VA matches.
+    const dryRun = await resolveDryRun();
+    const digest = await sendDailyDigest({ dryRun });
+
     await memory.finishAgentRun(run.id, "completed", {
       perception,
       filter,
       discovered,
+      digest,
     });
   } catch (error) {
     failed++;

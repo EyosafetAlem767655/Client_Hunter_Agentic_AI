@@ -32,6 +32,11 @@ vi.mock("@/lib/agent/action", () => ({
   draftEmailsForContacts: vi.fn().mockResolvedValue(0),
   sendApprovedEmails: vi.fn().mockResolvedValue({ sent: 0, failed: 0 }),
 }));
+vi.mock("@/lib/email/digest", () => ({
+  sendDailyDigest: vi
+    .fn()
+    .mockResolvedValue({ sent: false, count: 0, dryRun: true }),
+}));
 
 describe("pipeline integration", () => {
   beforeEach(() => {
