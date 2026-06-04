@@ -135,6 +135,6 @@ function loadEnv(): Env {
 export const env: Env = loadEnv();
 
 export const CRON_EMAIL_LIMIT = 30;
-export const CRON_POSTING_LIMIT = 50;
+export const CRON_POSTING_LIMIT = 150;
 export const DOMAIN_RATE_LIMIT_DAYS = 30;
 export const FILTER_BATCH_SIZE = 5;

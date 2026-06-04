@@ -17,7 +17,8 @@ export async function runNodeScrapers(limit: number): Promise<NodeScrapeResult> 
   const all: RawPosting[] = [];
   const sources: NodeScrapeResult["sources"] = [];
 
-  const perSource = Math.max(10, Math.ceil(limit));
+  // Ask each scraper for the full quota; downstream caps the run.
+  const perSource = Math.max(50, Math.ceil(limit));
 
   const results = await Promise.allSettled(
     scrapers.map(async (s) => {
@@ -38,9 +39,8 @@ export async function runNodeScrapers(limit: number): Promise<NodeScrapeResult> 
     }
   }
 
-  return {
-    postings: all.slice(0, limit * 3),
-    scraped: all.length,
-    sources,
-  };
+  // Return everything — perception filters down to VA + US/EU, then the
+  // memory layer dedupes against what's already in the DB. Slicing here
+  // would silently throw away matches.
+  return { postings: all, scraped: all.length, sources };
 }

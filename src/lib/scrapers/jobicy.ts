@@ -36,6 +36,10 @@ export class JobicyScraper extends BaseScraper {
       "customer-service",
       "administrative",
       "operations",
+      "data-entry",
+      "social-media",
+      "sales",
+      "marketing",
     ];
 
     const seen = new Set<string>();

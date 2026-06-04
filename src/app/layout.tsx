@@ -15,7 +15,20 @@ const jetbrains = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "TalentBridge Agent",
-  description: "Autonomous job-outreach pipeline dashboard",
+  description:
+    "Autonomous agent that scrapes US/EU virtual-assistant jobs daily and pitches vetted offshore talent.",
+  applicationName: "TalentBridge",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icon.svg", type: "image/svg+xml" }],
+  },
+  openGraph: {
+    title: "TalentBridge Agent",
+    description:
+      "Daily VA job scraping + GPT scoring + outreach, on Vercel Hobby.",
+    type: "website",
+  },
+  themeColor: "#0a0a14",
 };
 
 const nav = [

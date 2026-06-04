@@ -32,9 +32,13 @@ export class RemotiveScraper extends BaseScraper {
 
   async fetch(limit: number): Promise<RawPosting[]> {
     const queries = [
-      "https://remotive.com/api/remote-jobs?category=customer-support&limit=" + limit,
-      "https://remotive.com/api/remote-jobs?search=virtual+assistant&limit=" + limit,
-      "https://remotive.com/api/remote-jobs?search=executive+assistant&limit=" + limit,
+      `https://remotive.com/api/remote-jobs?category=customer-support&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=virtual+assistant&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=executive+assistant&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=administrative+assistant&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=data+entry&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=appointment+setter&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=customer+success&limit=${limit}`,
     ];
 
     const seen = new Set<string>();
