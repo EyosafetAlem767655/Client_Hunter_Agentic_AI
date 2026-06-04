@@ -1,0 +1,42 @@
+name: Python scrape (backup)
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install scraper deps
+        run: pip install -r scraper/requirements.txt
+
+      - name: Run Python scrapers
+        id: scrape
+        env:
+          CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL || 'contact@example.com' }}
+        run: |
+          python scraper/run.py --limit 50 > scrape-output.json
+          echo "count=$(python -c "import json; print(len(json.load(open('scrape-output.json'))['postings']))")" >> $GITHUB_OUTPUT
+
+      - name: Ingest into Vercel app
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "Skip ingest: set APP_URL and CRON_SECRET repository secrets for backup ingest"
+            exit 0
+          fi
+          POST_BODY=$(python -c "import json; d=json.load(open('scrape-output.json')); print(json.dumps({'postings': d['postings']}))")
+          curl -sf -X POST "$APP_URL/api/ingest/scrape" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$POST_BODY"

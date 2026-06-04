@@ -65,7 +65,22 @@ Open [http://localhost:3000](http://localhost:3000).
 2. Add all variables from `.env.example`.
 3. Connect Neon `DATABASE_URL`.
 4. Crons are configured via `vercel.json` (2 jobs — Hobby limit).
-5. Set `CRON_SECRET` and send `Authorization: Bearer <secret>` from Vercel cron.
+5. Set `CRON_SECRET` — Vercel cron sends `Authorization: Bearer <CRON_SECRET>` and `x-vercel-cron: 1` automatically.
+
+## Scraping (Python)
+
+Job scraping runs in **Python** (`scraper/`) for reliability:
+
+| Trigger | How |
+|---------|-----|
+| **Daily automatic** | Vercel cron `GET /api/cron/scrape` at **06:00 UTC** (Hobby: 2 crons max) |
+| **Manual** | Settings → paste `ADMIN_TOKEN` → **Run scrape now** |
+
+Flow: cron/manual → Node orchestrator → **Python** (`/api/py/scrape` on Vercel) → ingest → OpenAI filter → contact discovery.
+
+Local manual scrape: `python scraper/run.py --limit 50` (requires `pip install -r scraper/requirements.txt`).
+
+Optional GitHub Actions backup (`.github/workflows/scrape-python.yml`): set repo secrets `APP_URL` + `CRON_SECRET` for ingest at 06:30 UTC.
 
 ## Going live
 

@@ -12,6 +12,7 @@ import { memory } from "./memory";
 import { runPerception } from "./perception";
 import { filterPendingPostings } from "./reasoning";
 import { setRunId, logEvent } from "./observability";
+import type { RawPosting } from "@/types";
 import type { PipelineSummary } from "@/types";
 
 async function resolveDryRun(): Promise<boolean> {
@@ -27,6 +28,12 @@ async function resolveAgentEnabled(): Promise<boolean> {
 }
 
 export async function runScrapePipeline(): Promise<PipelineSummary> {
+  return runScrapePipelineFromPostings(null);
+}
+
+export async function runScrapePipelineFromPostings(
+  preloadedPostings: RawPosting[] | null
+): Promise<PipelineSummary> {
   const start = Date.now();
   const run = await memory.createAgentRun("scrape");
   setRunId(run.id);
@@ -36,7 +43,16 @@ export async function runScrapePipeline(): Promise<PipelineSummary> {
   let failed = 0;
 
   try {
-    const perception = await runPerception(CRON_POSTING_LIMIT);
+    let perception: { scraped: number; inserted: number; engine?: string };
+
+    if (preloadedPostings) {
+      const { ingestPostings } = await import("./perception");
+      const ingested = await ingestPostings(preloadedPostings);
+      perception = { ...ingested, engine: "python-ingest" };
+    } else {
+      perception = await runPerception(CRON_POSTING_LIMIT);
+    }
+
     processed += perception.scraped;
     succeeded += perception.inserted;
 

@@ -21,7 +21,8 @@ vi.mock("@/lib/db/queries", async (importOriginal) => {
   return { ...actual, ...mockDb };
 });
 vi.mock("@/lib/agent/perception", () => ({
-  runPerception: vi.fn().mockResolvedValue({ scraped: 2, inserted: 1 }),
+  runPerception: vi.fn().mockResolvedValue({ scraped: 2, inserted: 1, engine: "python" }),
+  ingestPostings: vi.fn().mockResolvedValue({ scraped: 2, inserted: 1 }),
 }));
 vi.mock("@/lib/agent/reasoning", () => ({
   filterPendingPostings: vi.fn().mockResolvedValue({ processed: 0, succeeded: 0 }),

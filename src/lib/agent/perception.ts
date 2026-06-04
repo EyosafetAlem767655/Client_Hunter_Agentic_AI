@@ -1,42 +1,44 @@
-import { getEnabledScrapers } from "@/lib/scrapers";
+import { runPythonScrapers } from "@/lib/scraper/python-client";
 import type { RawPosting } from "@/types";
 import { filterNewPostings, memory } from "./memory";
 import { logEvent } from "./observability";
 
-export async function runPerception(limit: number): Promise<{
-  scraped: number;
-  inserted: number;
-}> {
-  const scrapers = getEnabledScrapers();
-  const results = await Promise.allSettled(
-    scrapers.map((s) => s.fetch(limit))
-  );
-
-  const allPostings: RawPosting[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    const scraper = scrapers[i];
-    if (result.status === "fulfilled") {
-      allPostings.push(...result.value);
-      await logEvent("info", `Scraper ${scraper.source} returned ${result.value.length} postings`);
-    } else {
-      const err = result.reason;
-      const message =
-        err instanceof Error ? err.message : String(err);
-      const isRateLimit =
-        message.includes("403") || message.includes("429");
-      await logEvent(isRateLimit ? "warn" : "error", `Scraper ${scraper.source} failed`, {
-        error: message,
-      });
-    }
-  }
-
-  const novel = await filterNewPostings(allPostings);
+export async function ingestPostings(
+  postings: RawPosting[]
+): Promise<{ scraped: number; inserted: number }> {
+  const novel = await filterNewPostings(postings);
   let inserted = 0;
   for (const posting of novel) {
     await memory.upsertJobPosting(posting);
     inserted++;
   }
+  return { scraped: postings.length, inserted };
+}
 
-  return { scraped: allPostings.length, inserted };
+export async function runPerception(limit: number): Promise<{
+  scraped: number;
+  inserted: number;
+  engine: "python";
+}> {
+  await logEvent("info", "Starting Python scrapers");
+
+  const result = await runPythonScrapers(limit);
+
+  for (const source of result.sources) {
+    if (source.ok) {
+      await logEvent("info", `Python scraper ${source.source} returned ${source.count ?? 0} postings`);
+    } else {
+      const isRateLimit =
+        source.error?.includes("403") || source.error?.includes("429");
+      await logEvent(isRateLimit ? "warn" : "error", `Python scraper ${source.source} failed`, {
+        error: source.error,
+      });
+    }
+  }
+
+  const { scraped, inserted } = await ingestPostings(result.postings);
+
+  await logEvent("info", "Python scrape complete", { scraped, inserted });
+
+  return { scraped, inserted, engine: "python" };
 }

@@ -57,6 +57,19 @@ describe("API routes", () => {
     expect(res.status).toBe(401);
   });
 
+  it("cron scrape accepts Vercel cron header", async () => {
+    const prev = process.env.VERCEL;
+    process.env.VERCEL = "1";
+    const { GET } = await import("@/app/api/cron/scrape/route");
+    const res = await GET(
+      new Request("http://localhost/api/cron/scrape", {
+        headers: { "x-vercel-cron": "1" },
+      })
+    );
+    process.env.VERCEL = prev;
+    expect(res.status).toBe(200);
+  });
+
   it("cron scrape accepts valid auth", async () => {
     const { GET } = await import("@/app/api/cron/scrape/route");
     const res = await GET(
