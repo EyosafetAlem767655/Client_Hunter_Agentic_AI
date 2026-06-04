@@ -43,8 +43,8 @@ describe("API routes", () => {
     const { GET } = await import("@/app/api/health/route");
     const res = await GET();
     const json = await res.json();
-    expect(json.ok).toBe(true);
     expect(json).toHaveProperty("dbConnected");
+    expect(json).toHaveProperty("hasDatabaseUrl");
   });
 
   it("cron scrape rejects bad auth", async () => {

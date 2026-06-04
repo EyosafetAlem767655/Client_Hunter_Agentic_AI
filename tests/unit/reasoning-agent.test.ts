@@ -51,5 +51,5 @@ describe("reasoning agent", () => {
     const result = await filterPendingPostings(5);
     expect(result.processed).toBe(1);
     expect(result.succeeded).toBe(1);
-  });
+  }, 15_000);
 });

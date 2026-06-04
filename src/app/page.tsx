@@ -3,27 +3,13 @@ import { StatusIndicator } from "@/components/dashboard/status-indicator";
 import { PipelineFunnel } from "@/components/dashboard/pipeline-funnel";
 import { TrendChart } from "@/components/dashboard/trend-chart";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
-import { getDashboardStats, getEmailsSentPerDay, listRecentEvents, getLastSuccessfulRunAt } from "@/lib/db/queries";
+import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
+import { safeDashboardData } from "@/lib/db/safe-queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const stats = await getDashboardStats("7d");
-  const trend = await getEmailsSentPerDay(30);
-  const activity = await listRecentEvents(20, 0);
-  const lastRunAt = await getLastSuccessfulRunAt();
-
-  const activityMapped = activity.map((e) => ({
-    id: e.id,
-    level: e.level,
-    message: e.message,
-    createdAt: e.createdAt.toISOString(),
-  }));
-
-  const trendMapped = trend.map((t) => ({
-    day: String(t.day),
-    total: Number(t.total),
-  }));
+  const data = await safeDashboardData();
 
   return (
     <div className="space-y-8">
@@ -34,17 +20,19 @@ export default async function DashboardPage() {
             Autonomous scrape → filter → outreach for TalentBridge staffing
           </p>
         </div>
-        <StatusIndicator lastRunAt={lastRunAt?.toISOString() ?? null} />
+        <StatusIndicator lastRunAt={data.lastRunAt} />
       </div>
 
-      <StatsCards stats={stats} />
+      {!data.ok && <DbErrorBanner message={data.error} />}
+
+      <StatsCards stats={data.stats} />
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <PipelineFunnel stats={stats} />
-        <TrendChart trend={trendMapped} />
+        <PipelineFunnel stats={data.stats} />
+        <TrendChart trend={data.trend} />
       </div>
 
-      <RecentActivity events={activityMapped} />
+      <RecentActivity events={data.activity} />
     </div>
   );
 }

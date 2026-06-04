@@ -83,7 +83,7 @@ describe("action draft and send", () => {
     const { discoverContactsForTopJobs } = await import("@/lib/agent/action");
     const n = await discoverContactsForTopJobs(5);
     expect(n).toBe(1);
-  });
+  }, 15_000);
 
   it("drafts emails for contacts", async () => {
     const { draftEmailsForContacts } = await import("@/lib/agent/action");

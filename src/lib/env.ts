@@ -1,4 +1,47 @@
 import { z } from "zod";
+import { resolveDatabaseUrl } from "./database-url";
+
+/** Normalize Vercel/Neon env before zod validation. */
+export function normalizeEnv(
+  source: Record<string, string | undefined> = process.env
+): void {
+  const dbUrl = resolveDatabaseUrl(source);
+  if (dbUrl) {
+    source.DATABASE_URL = dbUrl;
+  }
+
+  if (!source.GMAIL_USER && source.CONTACT_EMAIL) {
+    source.GMAIL_USER = source.CONTACT_EMAIL;
+  }
+
+  if (!source.OPENAI_FILTER_MODEL) {
+    source.OPENAI_FILTER_MODEL = "gpt-4o-mini";
+  }
+
+  if (!source.OPENAI_DRAFT_MODEL) {
+    source.OPENAI_DRAFT_MODEL = "gpt-4o";
+  }
+
+  if (!source.DRY_RUN) {
+    source.DRY_RUN = "true";
+  }
+
+  if (!source.AGENT_ENABLED) {
+    source.AGENT_ENABLED = "true";
+  }
+
+  if (!source.DAILY_EMAIL_LIMIT) {
+    source.DAILY_EMAIL_LIMIT = "100";
+  }
+
+  if (!source.ENABLE_PATTERN_GUESSING) {
+    source.ENABLE_PATTERN_GUESSING = "false";
+  }
+
+  if (!source.ALLOW_LOW_CONFIDENCE_SEND) {
+    source.ALLOW_LOW_CONFIDENCE_SEND = "false";
+  }
+}
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -43,14 +86,20 @@ const envSchema = z.object({
 export type Env = z.infer<typeof envSchema>;
 
 function loadEnv(): Env {
+  normalizeEnv();
+
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
     if (process.env.SKIP_ENV_VALIDATION === "true") {
-      return envSchema.parse({
+      normalizeEnv({
         ...process.env,
-        DATABASE_URL: process.env.DATABASE_URL ?? "postgres://local/build",
+        DATABASE_URL:
+          resolveDatabaseUrl(process.env) || "postgres://local/build",
         OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "sk-build-placeholder",
-        GMAIL_USER: process.env.GMAIL_USER ?? "build@example.com",
+        GMAIL_USER:
+          process.env.GMAIL_USER ??
+          process.env.CONTACT_EMAIL ??
+          "build@example.com",
         GMAIL_APP_PASSWORD:
           process.env.GMAIL_APP_PASSWORD ?? "abcdefghijklmnop",
         CRON_SECRET: process.env.CRON_SECRET ?? "build-cron-secret-12345678",
@@ -63,12 +112,15 @@ function loadEnv(): Env {
         UNSUBSCRIBE_MAILTO:
           process.env.UNSUBSCRIBE_MAILTO ?? "unsubscribe@talentbridge.example",
         UNSUBSCRIBE_URL:
-          process.env.UNSUBSCRIBE_URL ?? "https://talentbridge.example/unsubscribe",
+          process.env.UNSUBSCRIBE_URL ??
+          "https://talentbridge.example/unsubscribe",
       });
+      return envSchema.parse(process.env);
     }
     const formatted = parsed.error.flatten().fieldErrors;
+    console.error("Invalid environment variables:", formatted);
     throw new Error(
-      `Invalid environment variables: ${JSON.stringify(formatted)}`
+      `Missing or invalid env vars: ${Object.keys(formatted).join(", ")}`
     );
   }
   return parsed.data;

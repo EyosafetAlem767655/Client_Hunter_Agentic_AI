@@ -1,18 +1,21 @@
 import { neon } from "@neondatabase/serverless";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
+import { resolveDatabaseUrl } from "@/lib/database-url";
 import * as schema from "./schema";
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 export function getDb() {
   if (!_db) {
-    const url = process.env.DATABASE_URL;
+    const url = resolveDatabaseUrl();
     if (!url) {
-      throw new Error("DATABASE_URL is not set");
+      throw new Error(
+        "No database URL found. Set DATABASE_URL or POSTGRES_URL (Neon/Vercel integration)."
+      );
     }
-    const sql = neon(url);
-    _db = drizzle(sql, { schema });
+    const client = neon(url);
+    _db = drizzle(client, { schema });
   }
   return _db;
 }
