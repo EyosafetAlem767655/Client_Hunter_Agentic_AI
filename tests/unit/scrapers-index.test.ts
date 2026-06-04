@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import { getEnabledScrapers } from "@/lib/scrapers";
 
 describe("scraper registry", () => {
-  it("returns three enabled scrapers", () => {
+  it("returns the full set of enabled scrapers in fallback order", () => {
     const scrapers = getEnabledScrapers();
-    expect(scrapers).toHaveLength(3);
     expect(scrapers.map((s) => s.source)).toEqual([
-      "remoteok",
+      "remotive",
+      "arbeitnow",
+      "jobicy",
       "weworkremotely",
+      "remoteok",
       "hn",
+      "wwr_dom",
     ]);
   });
 });

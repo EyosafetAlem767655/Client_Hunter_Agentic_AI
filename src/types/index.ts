@@ -1,4 +1,11 @@
-export type JobSource = "remoteok" | "weworkremotely" | "hn";
+export type JobSource =
+  | "remoteok"
+  | "weworkremotely"
+  | "hn"
+  | "remotive"
+  | "arbeitnow"
+  | "jobicy"
+  | "wwr_dom";
 
 export interface RawPosting {
   source: JobSource;

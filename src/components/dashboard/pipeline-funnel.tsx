@@ -15,25 +15,39 @@ export function PipelineFunnel({
   stats: Record<string, number>;
 }) {
   const data = [
-    { name: "Scraped", value: stats.scraped ?? 0, fill: "#8b5cf6" },
-    { name: "Relevant", value: stats.relevant ?? 0, fill: "#6366f1" },
-    { name: "Contact", value: stats.contactsFound ?? 0, fill: "#3b82f6" },
-    { name: "Drafted", value: stats.drafted ?? 0, fill: "#0ea5e9" },
-    { name: "Sent", value: stats.sent ?? 0, fill: "#14b8a6" },
-    { name: "Replied", value: stats.replied ?? 0, fill: "#22c55e" },
+    { name: "Scraped", value: stats.scraped ?? 0, fill: "#a78bfa" },
+    { name: "Relevant", value: stats.relevant ?? 0, fill: "#c084fc" },
+    { name: "Contact", value: stats.contactsFound ?? 0, fill: "#818cf8" },
+    { name: "Drafted", value: stats.drafted ?? 0, fill: "#38bdf8" },
+    { name: "Sent", value: stats.sent ?? 0, fill: "#2dd4bf" },
+    { name: "Replied", value: stats.replied ?? 0, fill: "#34d399" },
   ];
 
   return (
-    <Card className="glass-card">
-      <CardHeader>
+    <Card className="glass-card border-white/10">
+      <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Pipeline funnel</CardTitle>
+        <span className="text-xs text-muted-foreground">last 7d</span>
       </CardHeader>
       <CardContent className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <FunnelChart>
-            <Tooltip />
+            <Tooltip
+              contentStyle={{
+                background: "rgba(15, 14, 28, 0.95)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 10,
+                color: "#f1f5f9",
+              }}
+            />
             <Funnel dataKey="value" data={data} isAnimationActive>
-              <LabelList position="right" fill="#fff" stroke="none" dataKey="name" />
+              <LabelList
+                position="right"
+                fill="#e2e8f0"
+                stroke="none"
+                dataKey="name"
+                fontSize={12}
+              />
             </Funnel>
           </FunnelChart>
         </ResponsiveContainer>

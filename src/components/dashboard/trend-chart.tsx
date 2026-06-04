@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  Bar,
-  BarChart,
+  Area,
+  AreaChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -25,24 +25,40 @@ export function TrendChart({
   }));
 
   return (
-    <Card className="glass-card">
-      <CardHeader>
-        <CardTitle>Emails sent (30 days)</CardTitle>
+    <Card className="glass-card border-white/10">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>Emails sent</CardTitle>
+        <span className="text-xs text-muted-foreground">last 30d</span>
       </CardHeader>
       <CardContent className="h-80">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-            <XAxis dataKey="day" stroke="#94a3b8" fontSize={12} />
-            <YAxis stroke="#94a3b8" fontSize={12} />
+          <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            <defs>
+              <linearGradient id="emailGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.55} />
+                <stop offset="100%" stopColor="#a78bfa" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
+            <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
             <Tooltip
               contentStyle={{
-                background: "hsl(222 40% 10%)",
-                border: "1px solid hsl(217 33% 20%)",
+                background: "rgba(15, 14, 28, 0.95)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 10,
+                color: "#f1f5f9",
               }}
+              labelStyle={{ color: "#e2e8f0" }}
             />
-            <Bar dataKey="emails" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-          </BarChart>
+            <Area
+              type="monotone"
+              dataKey="emails"
+              stroke="#c4b5fd"
+              strokeWidth={2}
+              fill="url(#emailGrad)"
+            />
+          </AreaChart>
         </ResponsiveContainer>
       </CardContent>
     </Card>

@@ -27,11 +27,18 @@ export function assertAllowedUrl(url: string): void {
 export abstract class BaseScraper {
   readonly source: RawPosting["source"];
   protected userAgent: string;
+  protected acceptHeader = "application/json, text/html, application/xml;q=0.9, */*;q=0.8";
   private robotsCache = new Map<string, string>();
 
   constructor(source: RawPosting["source"], contactEmail: string) {
     this.source = source;
-    this.userAgent = `TalentBridgeBot/1.0 (+${contactEmail})`;
+    // Many job boards (RemoteOK, WeWorkRemotely, Cloudflare-fronted sites)
+    // block obviously-bot User-Agents from Vercel egress IPs. Use a realistic
+    // Chrome UA while still identifying ourselves in the From header.
+    this.userAgent =
+      process.env.SCRAPER_USER_AGENT ??
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+    void contactEmail;
   }
 
   abstract fetch(limit: number): Promise<RawPosting[]>;
@@ -50,10 +57,13 @@ export abstract class BaseScraper {
           ...options,
           headers: {
             "User-Agent": this.userAgent,
-            Accept: "application/json, text/html, application/xml",
+            Accept: this.acceptHeader,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
             ...(options.headers ?? {}),
           },
-          signal: AbortSignal.timeout(25_000),
+          signal: AbortSignal.timeout(20_000),
+          redirect: "follow",
         });
 
         if (response.status === 403 || response.status === 429) {

@@ -36,8 +36,17 @@ export async function runScrapePipelineFromPostings(
   preloadedPostings: RawPosting[] | null
 ): Promise<PipelineSummary> {
   const start = Date.now();
-  const run = await memory.createAgentRun("scrape");
-  setRunId(run.id);
+  let runId = -1;
+  try {
+    const run = await memory.createAgentRun("scrape");
+    runId = run.id;
+    setRunId(runId);
+  } catch (e) {
+    // DB may be unreachable on cold start. Continue with runId=-1 so the
+    // pipeline can still report what it tried, instead of returning 500.
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("createAgentRun failed", message);
+  }
 
   let processed = 0;
   let succeeded = 0;
@@ -76,23 +85,40 @@ export async function runScrapePipelineFromPostings(
     const dryRun = await resolveDryRun();
     const digest = await sendDailyDigest({ dryRun });
 
-    await memory.finishAgentRun(run.id, "completed", {
-      perception,
-      filter,
-      discovered,
-      digest,
-    });
+    if (runId !== -1) {
+      try {
+        await memory.finishAgentRun(runId, "completed", {
+          perception,
+          filter,
+          discovered,
+          digest,
+        });
+      } catch (e) {
+        console.error("finishAgentRun failed", e);
+      }
+    }
   } catch (error) {
     failed++;
     const message = error instanceof Error ? error.message : String(error);
-    await memory.finishAgentRun(run.id, "failed", undefined, message);
-    await logEvent("error", "Scrape pipeline failed", { error: message });
+    if (runId !== -1) {
+      try {
+        await memory.finishAgentRun(runId, "failed", undefined, message);
+      } catch (e) {
+        console.error("finishAgentRun (failed) failed", e);
+      }
+    }
+    try {
+      await logEvent("error", "Scrape pipeline failed", { error: message });
+    } catch {
+      // last resort — DB log failed, console is the only sink left
+      console.error("Scrape pipeline failed:", message);
+    }
   } finally {
     setRunId(undefined);
   }
 
   return {
-    runId: run.id,
+    runId,
     processed,
     succeeded,
     failed,
@@ -102,11 +128,17 @@ export async function runScrapePipelineFromPostings(
 
 export async function runOutreachPipeline(): Promise<PipelineSummary> {
   const start = Date.now();
-  const run = await memory.createAgentRun("outreach");
-  setRunId(run.id);
+  let runId = -1;
+  try {
+    const run = await memory.createAgentRun("outreach");
+    runId = run.id;
+    setRunId(runId);
+  } catch (e) {
+    console.error("createAgentRun (outreach) failed", e);
+  }
 
-  const dryRun = await resolveDryRun();
-  const agentEnabled = await resolveAgentEnabled();
+  const dryRun = await resolveDryRun().catch(() => true);
+  const agentEnabled = await resolveAgentEnabled().catch(() => false);
 
   let processed = 0;
   let succeeded = 0;
@@ -126,22 +158,38 @@ export async function runOutreachPipeline(): Promise<PipelineSummary> {
     succeeded += send.sent;
     failed += send.failed;
 
-    await memory.finishAgentRun(run.id, "completed", {
-      drafted,
-      send,
-      dryRun,
-    });
+    if (runId !== -1) {
+      try {
+        await memory.finishAgentRun(runId, "completed", {
+          drafted,
+          send,
+          dryRun,
+        });
+      } catch (e) {
+        console.error("finishAgentRun (outreach) failed", e);
+      }
+    }
   } catch (error) {
     failed++;
     const message = error instanceof Error ? error.message : String(error);
-    await memory.finishAgentRun(run.id, "failed", undefined, message);
-    await logEvent("error", "Outreach pipeline failed", { error: message });
+    if (runId !== -1) {
+      try {
+        await memory.finishAgentRun(runId, "failed", undefined, message);
+      } catch (e) {
+        console.error("finishAgentRun (outreach failed) failed", e);
+      }
+    }
+    try {
+      await logEvent("error", "Outreach pipeline failed", { error: message });
+    } catch {
+      console.error("Outreach pipeline failed:", message);
+    }
   } finally {
     setRunId(undefined);
   }
 
   return {
-    runId: run.id,
+    runId,
     processed,
     succeeded,
     failed,
