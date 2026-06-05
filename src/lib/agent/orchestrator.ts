@@ -88,6 +88,24 @@ export async function runScrapePipelineFromPostings(
     succeeded += discovered;
     processed += discovered;
 
+    // End-to-end outreach: draft personalized emails for the contacts we
+    // just discovered, then immediately try to deliver them. Both manual
+    // and cron paths go through this so the user no longer has to wait
+    // for the 14:00 UTC outreach cron to push the day's leads.
+    const agentEnabled = await resolveAgentEnabled();
+    const drafted = await draftEmailsForContacts(CRON_EMAIL_LIMIT, dryRun);
+    processed += drafted;
+    succeeded += drafted;
+
+    const sendOutcome = await sendApprovedEmails(
+      CRON_EMAIL_LIMIT,
+      dryRun,
+      agentEnabled
+    );
+    processed += sendOutcome.sent + sendOutcome.failed;
+    succeeded += sendOutcome.sent;
+    failed += sendOutcome.failed;
+
     // End-of-day digest of all matches found today (cron pass at 06:00 UTC
     // will fire this once a day; manual scrapes during the day still get
     // the instant alert above).
@@ -104,6 +122,8 @@ export async function runScrapePipelineFromPostings(
           },
           alert,
           discovered,
+          drafted,
+          send: sendOutcome,
           digest,
         });
       } catch (e) {

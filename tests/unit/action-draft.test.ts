@@ -23,7 +23,15 @@ vi.mock("@/lib/contact/discovery", () => ({
   discoverContactsForPosting: vi.fn().mockResolvedValue([
     { email: "hr@acme.com", sourceType: "listed", confidence: 0.9 },
   ]),
+  discoverFromBody: vi.fn().mockReturnValue([
+    { email: "hr@acme.com", sourceType: "listed", confidence: 0.9 },
+  ]),
+  discoverViaGrokBatch: vi.fn().mockResolvedValue(new Map()),
   pickBestContact: vi.fn((c: unknown[]) => c[0]),
+}));
+
+vi.mock("@/lib/llm/grok", () => ({
+  isGrokConfigured: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("@/lib/agent/memory", () => ({

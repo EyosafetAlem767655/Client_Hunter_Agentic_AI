@@ -133,3 +133,107 @@ describe("discoverViaGrok", () => {
     expect(await discoverViaGrok("A")).toEqual([]);
   });
 });
+
+describe("discoverViaGrokBatch", () => {
+  beforeEach(() => {
+    process.env.GROK_API_KEY = "xai-test-key";
+    // The previous describe block may have deleted the key and reset
+    // modules. Ensure env reloads with the key present so isGrokConfigured()
+    // sees it.
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_KEY === undefined) {
+      delete process.env.GROK_API_KEY;
+    } else {
+      process.env.GROK_API_KEY = ORIGINAL_KEY;
+    }
+    vi.restoreAllMocks();
+  });
+
+  it("sends a single request for all companies and maps results back by name", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockGrokResponse({
+        results: [
+          {
+            company: "Acme",
+            email: "careers@acme.com",
+            alternates: ["hr@acme.com"],
+            source_url: "https://acme.com/careers",
+            reason: "Found on careers page.",
+          },
+          {
+            company: "Widget",
+            email: "hiring@widget.io",
+            alternates: [],
+            source_url: "https://widget.io/about",
+            reason: null,
+          },
+          {
+            company: "DefunctCo",
+            email: null,
+            alternates: [],
+            source_url: null,
+            reason: "Site no longer reachable.",
+          },
+        ],
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
+    const out = await discoverViaGrokBatch([
+      { company: "Acme" },
+      { company: "Widget" },
+      { company: "DefunctCo" },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(out.get("Acme")?.[0].email).toBe("careers@acme.com");
+    expect(out.get("Widget")?.[0].email).toBe("hiring@widget.io");
+    expect(out.has("DefunctCo")).toBe(false);
+    // Alternates ranked lower than primary
+    const acmeAlt = out.get("Acme")?.find((c) => c.email === "hr@acme.com");
+    expect(acmeAlt?.confidence).toBeLessThan(out.get("Acme")![0].confidence);
+  });
+
+  it("dedupes by lowercase company before calling Grok", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockGrokResponse({ results: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
+    await discoverViaGrokBatch([
+      { company: "Acme" },
+      { company: "ACME" },
+      { company: "acme" },
+    ]);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    // Only one company line in the user prompt
+    const userMsg = body.messages[1].content;
+    const lines = (userMsg.match(/\n\d+\. /g) ?? []).length;
+    expect(lines).toBe(1);
+  });
+
+  it("returns empty map when Grok HTTP fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 502, text: async () => "" })
+    );
+    const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
+    const out = await discoverViaGrokBatch([{ company: "Acme" }]);
+    expect(out.size).toBe(0);
+  });
+
+  it("returns empty map when GROK_API_KEY missing", async () => {
+    delete process.env.GROK_API_KEY;
+    vi.resetModules();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
+    const out = await discoverViaGrokBatch([{ company: "Acme" }]);
+    expect(out.size).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

@@ -50,6 +50,7 @@ describe("pipeline integration", () => {
 
   it("runs scrape pipeline end-to-end with mocks", async () => {
     const { runScrapePipeline } = await import("@/lib/agent/orchestrator");
+    const action = await import("@/lib/agent/action");
     const summary = await runScrapePipeline();
     expect(summary.runId).toBe(1);
     expect(summary.succeeded).toBeGreaterThanOrEqual(0);
@@ -58,8 +59,14 @@ describe("pipeline integration", () => {
       "completed",
       expect.objectContaining({
         perception: expect.objectContaining({ scraped: 2 }),
+        drafted: 0,
+        send: expect.objectContaining({ sent: 0, failed: 0 }),
       })
     );
+    // The scrape pipeline now also runs draft + send so the user doesn't
+    // have to wait for the 14:00 UTC outreach cron.
+    expect(action.draftEmailsForContacts).toHaveBeenCalled();
+    expect(action.sendApprovedEmails).toHaveBeenCalled();
   }, 15_000);
 
   it("runs outreach pipeline without sending in dry run", async () => {
