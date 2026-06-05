@@ -14,10 +14,10 @@ const EMPTY_STATS = {
   replied: 0,
 };
 
-export async function safeDashboardData() {
+export async function safeDashboardData(timeWindow: string = "24h") {
   try {
     const [stats, trend, activity, lastRunAt] = await Promise.all([
-      getDashboardStats("7d"),
+      getDashboardStats(timeWindow),
       getEmailsSentPerDay(30),
       listRecentEvents(20, 0),
       getLastSuccessfulRunAt(),
@@ -25,6 +25,7 @@ export async function safeDashboardData() {
 
     return {
       ok: true as const,
+      timeWindow,
       stats,
       trend: trend.map((t) => ({
         day: String(t.day),
@@ -43,6 +44,7 @@ export async function safeDashboardData() {
       error instanceof Error ? error.message : "Database query failed";
     return {
       ok: false as const,
+      timeWindow,
       error: message,
       stats: EMPTY_STATS,
       trend: [] as Array<{ day: string; total: number }>,

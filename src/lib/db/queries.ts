@@ -512,9 +512,67 @@ export async function listJobsPaginated(params: {
   minScore?: number;
   page: number;
   pageSize: number;
+  timeWindow?: string;
 }) {
   const db = getDb();
   const offset = (params.page - 1) * params.pageSize;
+  const since = params.timeWindow ? windowStart(params.timeWindow) : null;
+
+  if (params.status === "unfiltered") {
+    const where = since
+      ? gte(jobPostings.scrapedAt, since)
+      : undefined;
+    const rows = await db
+      .select({ posting: jobPostings })
+      .from(jobPostings)
+      .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
+      .where(where ? and(isNull(filteredJobs.id), where) : isNull(filteredJobs.id))
+      .orderBy(desc(jobPostings.scrapedAt))
+      .limit(params.pageSize)
+      .offset(offset);
+    return { items: rows, total: rows.length };
+  }
+
+  if (params.status === "with-contact") {
+    const where = since ? gte(contacts.discoveredAt, since) : undefined;
+    const items = await db
+      .select({
+        posting: jobPostings,
+        filtered: filteredJobs,
+        contact: contacts,
+      })
+      .from(contacts)
+      .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
+      .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
+      .where(where)
+      .orderBy(desc(contacts.discoveredAt))
+      .limit(params.pageSize)
+      .offset(offset);
+    const [totalRow] = await db
+      .select({ total: count() })
+      .from(contacts)
+      .where(where);
+    return { items, total: totalRow?.total ?? 0 };
+  }
+
+  // No status param → "all jobs scraped in window" view; left-join filtered.
+  if (!params.status || params.status === "all") {
+    const where = since ? gte(jobPostings.scrapedAt, since) : undefined;
+    const items = await db
+      .select({ posting: jobPostings, filtered: filteredJobs })
+      .from(jobPostings)
+      .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
+      .where(where)
+      .orderBy(desc(jobPostings.scrapedAt))
+      .limit(params.pageSize)
+      .offset(offset);
+    const [totalRow] = await db
+      .select({ total: count() })
+      .from(jobPostings)
+      .where(where);
+    return { items, total: totalRow?.total ?? 0 };
+  }
+
   const conditions = [];
   if (params.minScore !== undefined) {
     conditions.push(gte(filteredJobs.score, params.minScore));
@@ -523,15 +581,9 @@ export async function listJobsPaginated(params: {
     conditions.push(eq(filteredJobs.isRelevant, true));
   } else if (params.status === "irrelevant") {
     conditions.push(eq(filteredJobs.isRelevant, false));
-  } else if (params.status === "unfiltered") {
-    const rows = await db
-      .select({ posting: jobPostings })
-      .from(jobPostings)
-      .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
-      .where(isNull(filteredJobs.id))
-      .limit(params.pageSize)
-      .offset(offset);
-    return { items: rows, total: rows.length };
+  }
+  if (since) {
+    conditions.push(gte(filteredJobs.filteredAt, since));
   }
 
   const where = conditions.length ? and(...conditions) : undefined;
@@ -552,16 +604,85 @@ export async function listJobsPaginated(params: {
   return { items, total: totalRow?.total ?? 0 };
 }
 
+/**
+ * Wipe all ingested pipeline data so the user can start fresh. Keeps:
+ * - settings (preserves DRY_RUN, AGENT_ENABLED, admin-set values)
+ * - suppression_list (unsubscribes / bounces should never be lost)
+ *
+ * Cron schedules live in vercel.json, not the DB — they are unaffected.
+ */
+export async function resetPipelineData(): Promise<{
+  tables: string[];
+  counts: Record<string, number>;
+}> {
+  const db = getDb();
+  // CASCADE handles FKs (filtered_jobs → job_postings, contacts → job_postings,
+  // outreach_emails → contacts, agent_events → agent_runs). RESTART IDENTITY
+  // resets serial PKs so the next run starts at id 1.
+  await db.execute(sql`TRUNCATE TABLE
+    outreach_emails,
+    contacts,
+    filtered_jobs,
+    job_postings,
+    agent_events,
+    agent_runs,
+    rate_limits,
+    llm_cache
+    RESTART IDENTITY CASCADE`);
+
+  const counts: Record<string, number> = {};
+  for (const t of [
+    "job_postings",
+    "filtered_jobs",
+    "contacts",
+    "outreach_emails",
+    "agent_runs",
+    "agent_events",
+    "rate_limits",
+    "llm_cache",
+  ] as const) {
+    const res = (await db.execute(
+      sql.raw(`SELECT COUNT(*)::int AS total FROM ${t}`)
+    )) as unknown;
+    let total = 0;
+    if (Array.isArray(res)) {
+      total = (res as Array<{ total: number }>)[0]?.total ?? 0;
+    } else if (res && typeof res === "object" && "rows" in res) {
+      const rows = (res as { rows: Array<{ total: number }> }).rows;
+      total = rows?.[0]?.total ?? 0;
+    }
+    counts[t] = total;
+  }
+
+  return {
+    tables: Object.keys(counts),
+    counts,
+  };
+}
+
 export async function listOutreachPaginated(params: {
   status?: string;
   page: number;
   pageSize: number;
+  timeWindow?: string;
 }) {
   const db = getDb();
   const offset = (params.page - 1) * params.pageSize;
-  const where = params.status
-    ? eq(outreachEmails.status, params.status)
-    : undefined;
+  const since = params.timeWindow ? windowStart(params.timeWindow) : null;
+
+  const filters = [] as Array<ReturnType<typeof eq>>;
+  if (params.status) {
+    filters.push(eq(outreachEmails.status, params.status));
+  }
+  if (since) {
+    // For sent rows, filter by sentAt; otherwise by createdAt.
+    if (params.status === "sent") {
+      filters.push(gte(outreachEmails.sentAt, since));
+    } else {
+      filters.push(gte(outreachEmails.createdAt, since));
+    }
+  }
+  const where = filters.length ? and(...filters) : undefined;
 
   const items = await db
     .select({

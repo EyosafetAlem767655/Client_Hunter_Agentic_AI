@@ -10,8 +10,10 @@ import {
 
 export function OutreachClient({
   byStatus,
+  initialTab = "pending",
 }: {
   byStatus: Record<string, OutreachRow[]>;
+  initialTab?: string;
 }) {
   const [selected, setSelected] = useState<OutreachRow | null>(null);
 
@@ -24,7 +26,7 @@ export function OutreachClient({
 
   return (
     <>
-      <Tabs defaultValue="pending">
+      <Tabs defaultValue={initialTab}>
         <TabsList>
           {tabs.map((t) => (
             <TabsTrigger key={t.key} value={t.key}>

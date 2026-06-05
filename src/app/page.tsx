@@ -11,8 +11,22 @@ import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
-  const data = await safeDashboardData();
+const WINDOW_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
+];
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: { window?: string };
+}) {
+  const requested = searchParams?.window ?? "24h";
+  const timeWindow = WINDOW_OPTIONS.some((o) => o.value === requested)
+    ? requested
+    : "24h";
+  const data = await safeDashboardData(timeWindow);
   const dryRun = env.DRY_RUN;
 
   return (
@@ -88,12 +102,40 @@ export default async function DashboardPage() {
 
       {/* KPIs */}
       <section>
-        <SectionHeader
-          eyebrow="Last 7 days"
-          title="Pipeline at a glance"
-          subtitle="Numbers update on every scrape and outreach run."
-        />
-        <StatsCards stats={data.stats} />
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wider text-primary/80">
+              {timeWindow === "24h"
+                ? "Last 24 hours"
+                : timeWindow === "7d"
+                  ? "Last 7 days"
+                  : "Last 30 days"}
+            </span>
+            <h2 className="text-2xl font-bold tracking-tight">
+              Pipeline at a glance
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Click any tile to drill into the underlying records.
+            </p>
+          </div>
+          <div className="inline-flex rounded-xl border border-white/10 bg-white/5 p-1 backdrop-blur">
+            {WINDOW_OPTIONS.map((opt) => (
+              <Link
+                key={opt.value}
+                href={`/?window=${opt.value}`}
+                scroll={false}
+                className={`rounded-lg px-3 py-1.5 text-sm transition ${
+                  timeWindow === opt.value
+                    ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow"
+                    : "text-foreground/70 hover:text-foreground"
+                }`}
+              >
+                {opt.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+        <StatsCards stats={data.stats} timeWindow={timeWindow} />
       </section>
 
       {/* Funnel + Trend */}

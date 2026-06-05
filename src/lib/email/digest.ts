@@ -218,8 +218,9 @@ export async function sendInstantVaAlert(
   const messageId = generateMessageId();
 
   if (dryRun) {
-    await logEvent("info", "Instant VA alert skipped (dry run)", {
+    await logEvent("warn", "Instant VA alert NOT sent — DRY_RUN is on", {
       count: matches.length,
+      hint: "Flip DRY_RUN off in Settings to receive real emails.",
     });
     return { sent: false, count: matches.length, dryRun: true, messageId };
   }
@@ -228,7 +229,7 @@ export async function sendInstantVaAlert(
     const transport = createTransport();
     const subject = `[TalentBridge] ${matches.length} new VA-similar role${matches.length === 1 ? "" : "s"} found at US/EU employers`;
 
-    await transport.sendMail({
+    const info = await transport.sendMail({
       from: `${env.BUSINESS_NAME} <${env.GMAIL_USER}>`,
       to: env.CONTACT_EMAIL,
       subject,
@@ -239,6 +240,7 @@ export async function sendInstantVaAlert(
     await logEvent("info", "Instant VA alert sent", {
       to: env.CONTACT_EMAIL,
       count: matches.length,
+      smtpResponse: (info as { response?: string })?.response,
     });
     return { sent: true, count: matches.length, messageId, dryRun: false };
   } catch (error) {
@@ -246,6 +248,43 @@ export async function sendInstantVaAlert(
       error: error instanceof Error ? error.message : String(error),
     });
     return { sent: false, count: matches.length, dryRun: false };
+  }
+}
+
+/**
+ * Send a tiny diagnostic email so the user can verify Gmail credentials
+ * work end-to-end without waiting for a scrape match. Always sends (no
+ * dry-run gate) and surfaces SMTP errors.
+ */
+export async function sendTestEmail(): Promise<{
+  sent: boolean;
+  to: string;
+  error?: string;
+}> {
+  const to = env.CONTACT_EMAIL;
+  try {
+    const transport = createTransport();
+    const info = await transport.sendMail({
+      from: `${env.BUSINESS_NAME} <${env.GMAIL_USER}>`,
+      to,
+      subject: "TalentBridge test email",
+      text:
+        "This is a test email sent from your TalentBridge agent on Vercel.\n\n" +
+        "If you can read this, your Gmail credentials are configured correctly and the agent can deliver real outreach emails.\n",
+      html:
+        `<p>This is a test email sent from your TalentBridge agent on Vercel.</p>` +
+        `<p>If you can read this, your Gmail credentials are configured correctly and the agent can deliver real outreach emails.</p>`,
+      messageId: generateMessageId(),
+    });
+    await logEvent("info", "Test email sent", {
+      to,
+      smtpResponse: (info as { response?: string })?.response,
+    });
+    return { sent: true, to };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await logEvent("error", "Test email failed", { to, error: message });
+    return { sent: false, to, error: message };
   }
 }
 
@@ -257,7 +296,10 @@ export async function sendDailyDigest(
   const messageId = generateMessageId();
 
   if (dryRun) {
-    await logEvent("info", "Digest email skipped (dry run)", { count: rows.length });
+    await logEvent("warn", "Digest email NOT sent — DRY_RUN is on", {
+      count: rows.length,
+      hint: "Flip DRY_RUN off in Settings to receive real emails.",
+    });
     return { sent: false, count: rows.length, dryRun: true, messageId };
   }
 
@@ -268,7 +310,7 @@ export async function sendDailyDigest(
         ? `TalentBridge VA digest — no matches today`
         : `TalentBridge VA digest — ${rows.length} VA roles at US/EU employers`;
 
-    await transport.sendMail({
+    const info = await transport.sendMail({
       from: `${env.BUSINESS_NAME} <${env.GMAIL_USER}>`,
       to: env.CONTACT_EMAIL,
       subject,
@@ -279,6 +321,7 @@ export async function sendDailyDigest(
     await logEvent("info", "Digest email sent", {
       to: env.CONTACT_EMAIL,
       count: rows.length,
+      smtpResponse: (info as { response?: string })?.response,
     });
     return { sent: true, count: rows.length, messageId, dryRun: false };
   } catch (error) {

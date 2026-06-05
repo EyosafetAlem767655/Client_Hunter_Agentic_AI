@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Eye,
   EyeOff,
@@ -13,7 +14,9 @@ import {
   Loader2,
   Mail,
   Play,
+  Send,
   Sparkles,
+  Trash2,
   Wand2,
 } from "lucide-react";
 
@@ -83,12 +86,19 @@ export function SettingsClient({
     showToast("ok", "Setting updated");
   }
 
-  async function runManual(path: string, label: string) {
+  async function runManual(
+    path: string,
+    label: string,
+    opts: { confirm?: string } = {}
+  ) {
     if (!token.trim()) {
       showToast(
         "err",
         "Unauthorized — enter ADMIN_TOKEN from Vercel → Settings → Environment Variables."
       );
+      return;
+    }
+    if (opts.confirm && !window.confirm(opts.confirm)) {
       return;
     }
     setLoading(label);
@@ -184,6 +194,23 @@ export function SettingsClient({
         </CardContent>
       </Card>
 
+      {settings.DRY_RUN && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+          <div className="text-sm">
+            <div className="font-medium text-amber-200">
+              DRY_RUN is on — no real emails are being delivered.
+            </div>
+            <p className="mt-1 text-amber-200/80">
+              The pipeline reports &quot;sent&quot; in dry-run mode but Gmail is
+              never called. Toggle <strong>Dry run</strong> off below to receive
+              real digest and alert emails. Use <strong>Send test email</strong>{" "}
+              first to confirm your Gmail credentials work.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Manual actions */}
         <Card className="glass-card lg:col-span-2">
@@ -200,7 +227,7 @@ export function SettingsClient({
             <div className="grid gap-3 sm:grid-cols-2">
               <ActionTile
                 title="Run scrape now"
-                description="Fetch VA / remote-support jobs from RemoteOK, WeWorkRemotely, HN, run them through the LLM filter, discover contacts, and email the daily digest."
+                description="Fetch VA jobs, score with the LLM, discover contacts, and email the digest + instant alerts."
                 disabled={loading !== null}
                 loading={loading === "Scrape"}
                 onClick={() => runManual("/api/manual/scrape", "Scrape")}
@@ -216,6 +243,30 @@ export function SettingsClient({
                 onClick={() => runManual("/api/manual/outreach", "Outreach")}
                 icon={<Mail className="h-5 w-5" />}
                 gradient="from-sky-500/30 to-emerald-500/20"
+              />
+              <ActionTile
+                title="Send test email"
+                description="Send a one-off test email to CONTACT_EMAIL via Gmail. Bypasses DRY_RUN — use this to verify your Gmail app password is correct."
+                disabled={loading !== null}
+                loading={loading === "Test email"}
+                onClick={() => runManual("/api/manual/test-email", "Test email")}
+                icon={<Send className="h-5 w-5" />}
+                gradient="from-emerald-500/30 to-teal-500/20"
+              />
+              <ActionTile
+                title="Reset all data"
+                description="Wipe every scraped job, filter result, contact, draft, and run log. Keeps settings, cron schedule, and the suppression list. This cannot be undone."
+                disabled={loading !== null}
+                loading={loading === "Reset"}
+                onClick={() =>
+                  runManual("/api/manual/reset?confirm=yes", "Reset", {
+                    confirm:
+                      "This will delete every scraped job, filter result, contact, draft, and run log. Settings and cron schedule are preserved. Continue?",
+                  })
+                }
+                icon={<Trash2 className="h-5 w-5" />}
+                gradient="from-red-500/30 to-rose-500/20"
+                destructive
               />
             </div>
 
@@ -330,6 +381,7 @@ function ActionTile({
   icon,
   gradient,
   primary,
+  destructive,
 }: {
   title: string;
   description: string;
@@ -339,13 +391,20 @@ function ActionTile({
   icon: React.ReactNode;
   gradient: string;
   primary?: boolean;
+  destructive?: boolean;
 }) {
   return (
     <div
-      className={`group relative overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br ${gradient} p-5 transition hover:border-primary/60`}
+      className={`group relative overflow-hidden rounded-xl border ${
+        destructive ? "border-red-500/30 hover:border-red-400/60" : "border-border/40 hover:border-primary/60"
+      } bg-gradient-to-br ${gradient} p-5 transition`}
     >
       <div className="mb-3 flex items-center gap-2 text-foreground">
-        <div className="rounded-md bg-background/60 p-2 ring-1 ring-border/50">
+        <div
+          className={`rounded-md bg-background/60 p-2 ring-1 ${
+            destructive ? "ring-red-500/50 text-red-300" : "ring-border/50"
+          }`}
+        >
           {icon}
         </div>
         <h4 className="font-semibold">{title}</h4>
@@ -356,13 +415,15 @@ function ActionTile({
         disabled={disabled}
         variant={primary ? "default" : "outline"}
         size="sm"
-        className="w-full"
+        className={`w-full ${destructive ? "border-red-500/50 text-red-200 hover:bg-red-500/10" : ""}`}
       >
         {loading ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" />
             Running…
           </>
+        ) : destructive ? (
+          <>Wipe data</>
         ) : (
           <>Run now</>
         )}

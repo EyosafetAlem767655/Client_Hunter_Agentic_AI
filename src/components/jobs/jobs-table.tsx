@@ -20,6 +20,17 @@ export interface JobRow {
   fitReason: string | null;
   description: string;
   url: string;
+  scrapedAt?: string | null;
+  contactEmail?: string | null;
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 export function JobsTable({ jobs }: { jobs: JobRow[] }) {
@@ -33,11 +44,20 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
             <tr>
               <th className="p-4">Title</th>
               <th className="p-4">Company</th>
+              <th className="p-4">Scraped</th>
+              <th className="p-4">Contact</th>
               <th className="p-4">Score</th>
               <th className="p-4">Status</th>
             </tr>
           </thead>
           <tbody>
+            {jobs.length === 0 && (
+              <tr>
+                <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                  No jobs match this filter yet.
+                </td>
+              </tr>
+            )}
             {jobs.map((job) => (
               <tr
                 key={job.id}
@@ -46,6 +66,18 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
               >
                 <td className="p-4 font-medium">{job.title}</td>
                 <td className="p-4">{job.company}</td>
+                <td className="p-4 whitespace-nowrap text-xs text-muted-foreground">
+                  {job.scrapedAt ? relativeTime(job.scrapedAt) : "—"}
+                </td>
+                <td className="p-4 text-xs">
+                  {job.contactEmail ? (
+                    <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-emerald-300">
+                      {job.contactEmail}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
                 <td className="p-4">
                   <div className="flex items-center gap-2">
                     <div className="h-2 w-24 overflow-hidden rounded-full bg-muted">
