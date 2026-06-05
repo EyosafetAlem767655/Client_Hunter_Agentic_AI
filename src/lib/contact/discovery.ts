@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { callGrokJson, isGrokConfigured } from "@/lib/llm/grok";
 import { assertAllowedUrl } from "@/lib/scrapers/base";
 import type { DiscoveredContact } from "@/types";
 
@@ -266,6 +267,104 @@ function safeHost(url: string): string | null {
   }
 }
 
+interface GrokContactResult {
+  /** Primary outreach email Grok found for the company. */
+  email: string | null;
+  /** Optional secondary candidates. */
+  alternates?: string[];
+  /** Why Grok chose this email (URL of the page it scraped from). */
+  source_url?: string | null;
+  /** Free-form confidence rationale Grok produced. */
+  reason?: string | null;
+}
+
+const GROK_CONTACT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    email: { type: ["string", "null"] },
+    alternates: {
+      type: "array",
+      items: { type: "string" },
+    },
+    source_url: { type: ["string", "null"] },
+    reason: { type: ["string", "null"] },
+  },
+  required: ["email", "alternates", "source_url", "reason"],
+};
+
+const GROK_SYSTEM_PROMPT = `You are a research assistant tasked with finding the best public contact email for a US, UK, or EU company so a recruiting agency can pitch them. You have live web search available. Rules:
+- Search the web for the company's official site and look at /contact, /about, /careers, /press, and footer text.
+- Prefer role-based addresses in this order: careers@, hiring@, jobs@, recruiting@, hr@, people@, talent@, partners@, contact@, hello@, info@.
+- Never invent an email. Only return one you actually saw on the public web.
+- Reject noreply@, postmaster@, abuse@, *@sentry.io, *@wixpress.com, *@indeed.com, *@linkedin.com, *@greenhouse.io, *@lever.co, *@ashbyhq.com, *@workable.com, *@example.com — these are not the employer.
+- If the company appears defunct, missing, or only listed on aggregators, return email: null with a one-sentence reason.
+- Output strictly the JSON shape requested.`;
+
+/**
+ * Use Grok's built-in web search to find the right outreach email for a
+ * company. Falls back to no result rather than guessing.
+ */
+export async function discoverViaGrok(
+  company: string,
+  posting?: { title?: string; url?: string }
+): Promise<DiscoveredContact[]> {
+  if (!isGrokConfigured()) return [];
+  if (!company || company.trim().length < 2) return [];
+
+  const userPrompt = [
+    `Find the best public hiring or business-contact email for the company below.`,
+    ``,
+    `Company: ${company}`,
+    posting?.title ? `Job title (context): ${posting.title}` : null,
+    posting?.url ? `Job posting URL (context): ${posting.url}` : null,
+    ``,
+    `Return JSON: { "email": string|null, "alternates": string[], "source_url": string|null, "reason": string|null }.`,
+    `If you can't verify the email exists on a credible page, return email=null.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  let result: Awaited<ReturnType<typeof callGrokJson<GrokContactResult>>>;
+  try {
+    result = await callGrokJson<GrokContactResult>({
+      system: GROK_SYSTEM_PROMPT,
+      user: userPrompt,
+      searchMode: "on",
+      maxSearchResults: 6,
+      sources: [{ type: "web" }],
+      jsonSchema: GROK_CONTACT_SCHEMA,
+      timeoutMs: 22_000,
+    });
+  } catch {
+    return [];
+  }
+
+  const payload = result.data;
+  if (!payload) return [];
+
+  const collected: DiscoveredContact[] = [];
+  const seen = new Set<string>();
+  const ordered = [payload.email, ...(payload.alternates ?? [])].filter(
+    (e): e is string => typeof e === "string" && e.length > 0
+  );
+
+  for (let i = 0; i < ordered.length; i++) {
+    const email = ordered[i].toLowerCase().trim();
+    if (seen.has(email)) continue;
+    if (!isUsefulEmail(email)) continue;
+    seen.add(email);
+    // Top result is high-confidence (Grok cited a source); alternates step down.
+    const baseConf = i === 0 ? 0.92 : 0.75 - i * 0.05;
+    collected.push({
+      email,
+      sourceType: "scraped_from_site",
+      confidence: Math.max(0.5, Math.min(0.95, baseConf)),
+    });
+  }
+  return collected;
+}
+
 export function discoverByPatternGuess(
   companyUrl: string
 ): DiscoveredContact[] {
@@ -308,20 +407,34 @@ export async function discoverContactsForPosting(posting: {
   url: string;
   company: string;
 }): Promise<DiscoveredContact[]> {
-  // 1. Easiest: the posting body sometimes lists a hiring email directly.
+  // 1. Easiest + cheapest: the posting body sometimes lists a hiring email.
   const fromBody = discoverFromBody(posting.description);
   if (fromBody.length > 0) return fromBody;
 
   const accumulated: DiscoveredContact[] = [];
 
-  // 2. Try the posting URL's company website (if not a job board).
-  const companyDomain = extractCompanyDomain(posting.url);
-  if (companyDomain) {
-    const fromSite = await discoverFromCompanySite(`https://${companyDomain}`);
-    accumulated.push(...fromSite);
+  // 2. Ask Grok to find the right email via live web search. This is the
+  //    most accurate path — Grok visits the company's real site, picks the
+  //    role-based address, and cites the source page. Skipped when
+  //    GROK_API_KEY isn't configured so the build stays fully optional.
+  if (posting.company && isGrokConfigured()) {
+    const fromGrok = await discoverViaGrok(posting.company, {
+      title: posting.description.slice(0, 120),
+      url: posting.url,
+    });
+    accumulated.push(...fromGrok);
   }
 
-  // 3. Look up the company's actual website via search, then scrape it.
+  // 3. Try the posting URL's company website (if it isn't a job board).
+  if (accumulated.length === 0) {
+    const companyDomain = extractCompanyDomain(posting.url);
+    if (companyDomain) {
+      const fromSite = await discoverFromCompanySite(`https://${companyDomain}`);
+      accumulated.push(...fromSite);
+    }
+  }
+
+  // 4. DuckDuckGo lookup for the company's actual homepage + scrape it.
   if (accumulated.length === 0 && posting.company) {
     const homepage = await findCompanyHomepage(posting.company);
     if (homepage) {
@@ -330,15 +443,18 @@ export async function discoverContactsForPosting(posting: {
     }
   }
 
-  // 4. Last resort: search result snippets directly.
+  // 5. DDG search-result snippets as a last open-web pass.
   if (accumulated.length === 0 && posting.company) {
     const fromSearch = await discoverViaSearch(posting.company);
     accumulated.push(...fromSearch);
   }
 
-  // 5. Pattern-guess fallback (opt-in via env).
-  if (accumulated.length === 0 && companyDomain) {
-    accumulated.push(...discoverByPatternGuess(posting.url));
+  // 6. Pattern-guess fallback (opt-in via env).
+  if (accumulated.length === 0) {
+    const companyDomain = extractCompanyDomain(posting.url);
+    if (companyDomain) {
+      accumulated.push(...discoverByPatternGuess(posting.url));
+    }
   }
 
   return accumulated;

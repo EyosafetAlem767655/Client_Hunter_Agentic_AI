@@ -41,6 +41,16 @@ export function normalizeEnv(
   if (!source.ALLOW_LOW_CONFIDENCE_SEND) {
     source.ALLOW_LOW_CONFIDENCE_SEND = "false";
   }
+
+  // The user may have named the secret either GROK_API_KEY (standard) or
+  // GROK_API_key (mixed case). Accept either.
+  if (!source.GROK_API_KEY && source.GROK_API_key) {
+    source.GROK_API_KEY = source.GROK_API_key;
+  }
+
+  if (!source.GROK_MODEL) {
+    source.GROK_MODEL = "grok-4-fast-non-reasoning";
+  }
 }
 
 const envSchema = z.object({
@@ -81,6 +91,8 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),
+  GROK_API_KEY: z.string().min(1).optional(),
+  GROK_MODEL: z.string().default("grok-4-fast-non-reasoning"),
 });
 
 export type Env = z.infer<typeof envSchema>;
