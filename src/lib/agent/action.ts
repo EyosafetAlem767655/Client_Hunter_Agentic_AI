@@ -21,8 +21,12 @@ import { memory } from "./memory";
 import { logEvent } from "./observability";
 import { withConcurrency } from "./reasoning";
 
-/** Grok batch size — user-mandated. */
-export const GROK_LOOKUP_BATCH_SIZE = 5;
+/**
+ * Grok batch size. Smaller batches mean smaller per-call latency and a
+ * higher hit rate — Grok's structured-output reliability drops fast once
+ * we ask it about 5+ companies in one go, so we send 3 at a time.
+ */
+export const GROK_LOOKUP_BATCH_SIZE = 3;
 
 /**
  * Two-phase discovery so we hit Grok in groups of 5:

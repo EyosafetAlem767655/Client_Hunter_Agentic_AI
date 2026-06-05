@@ -66,13 +66,13 @@ describe("discoverViaGrok", () => {
     expect(body.search_parameters.return_citations).toBe(true);
   });
 
-  it("drops blocked / noisy emails Grok returns", async () => {
+  it("drops only obvious automation locals (noreply/postmaster); accepts everything else", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
         mockGrokResponse({
           email: "noreply@acme.com",
-          alternates: ["foo@sentry.io", "real@goodcompany.io"],
+          alternates: ["info@acme.com", "real@goodcompany.io"],
           source_url: null,
           reason: null,
         })
@@ -80,7 +80,11 @@ describe("discoverViaGrok", () => {
     );
     const { discoverViaGrok } = await import("@/lib/contact/discovery");
     const out = await discoverViaGrok("Acme");
-    expect(out.map((c) => c.email)).toEqual(["real@goodcompany.io"]);
+    // Loose policy: noreply blocked, generic info@/personal@ allowed.
+    expect(out.map((c) => c.email)).toEqual([
+      "info@acme.com",
+      "real@goodcompany.io",
+    ]);
   });
 
   it("returns [] when Grok responds with email=null", async () => {
@@ -189,7 +193,11 @@ describe("discoverViaGrokBatch", () => {
       { company: "DefunctCo" },
     ]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Grok endpoint hit once (other fetches may come from neon-http logging).
+    const xaiCalls = fetchMock.mock.calls.filter((c) =>
+      String(c[0]).includes("api.x.ai")
+    );
+    expect(xaiCalls.length).toBe(1);
     expect(out.get("Acme")?.[0].email).toBe("careers@acme.com");
     expect(out.get("Widget")?.[0].email).toBe("hiring@widget.io");
     expect(out.has("DefunctCo")).toBe(false);
@@ -235,5 +243,54 @@ describe("discoverViaGrokBatch", () => {
     const out = await discoverViaGrokBatch([{ company: "Acme" }]);
     expect(out.size).toBe(0);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("recovers JSON wrapped in a markdown ```json fence", async () => {
+    const fenced = `Sure, here you go:\n\n\`\`\`json\n${JSON.stringify({
+      results: [
+        { company: "Acme", email: "contact@acme.com", alternates: [] },
+      ],
+    })}\n\`\`\`\n`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: fenced } }],
+          citations: [],
+        }),
+        text: async () => "",
+      })
+    );
+    const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
+    const out = await discoverViaGrokBatch([{ company: "Acme" }]);
+    expect(out.get("Acme")?.[0].email).toBe("contact@acme.com");
+  });
+
+  it("harvests emails from prose when Grok ignores the JSON instruction", async () => {
+    const prose =
+      "Couldn't structure this perfectly but here's what I found: " +
+      "For Acme, the careers team uses hello@acme.com and for Widget try info@widget.io — both look genuine.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: prose } }],
+          citations: [],
+        }),
+        text: async () => "",
+      })
+    );
+    const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
+    const out = await discoverViaGrokBatch([
+      { company: "Acme" },
+      { company: "Widget" },
+    ]);
+    // Salvage pass assigned by proximity to company name in the prose.
+    expect(out.get("Acme")?.[0].email).toBe("hello@acme.com");
+    expect(out.get("Widget")?.[0].email).toBe("info@widget.io");
   });
 });

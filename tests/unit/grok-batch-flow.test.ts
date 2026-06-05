@@ -51,7 +51,7 @@ describe("discoverContactsForTopJobs (batched Grok)", () => {
     process.env.GROK_API_KEY = "xai-test";
   });
 
-  it("groups 12 pending jobs into 3 Grok calls of size 5/5/2 and persists matches", async () => {
+  it("groups 12 pending jobs into 4 Grok calls of size 3 each and persists matches", async () => {
     const { memory } = await import("@/lib/agent/memory");
     const jobs = Array.from({ length: 12 }, (_, i) =>
       jobRow(i + 1, `Co${i + 1}`)
@@ -81,12 +81,12 @@ describe("discoverContactsForTopJobs (batched Grok)", () => {
     const { discoverContactsForTopJobs } = await import("@/lib/agent/action");
     const n = await discoverContactsForTopJobs(50);
 
-    // 12 jobs, batched in groups of 5 → 3 calls
-    expect(discoverViaGrokBatch).toHaveBeenCalledTimes(3);
+    // 12 jobs, batched in groups of 3 → 4 calls of size 3
+    expect(discoverViaGrokBatch).toHaveBeenCalledTimes(4);
     const sizes = discoverViaGrokBatch.mock.calls
       .map((c) => c[0].length)
       .sort();
-    expect(sizes).toEqual([2, 5, 5]);
+    expect(sizes).toEqual([3, 3, 3, 3]);
 
     // All 12 should have been persisted
     expect(upsertContact).toHaveBeenCalledTimes(12);

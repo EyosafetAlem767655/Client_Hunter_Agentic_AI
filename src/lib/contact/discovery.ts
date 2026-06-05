@@ -1,6 +1,7 @@
 import { env } from "@/lib/env";
 import { callGrokJson, isGrokConfigured } from "@/lib/llm/grok";
 import { assertAllowedUrl } from "@/lib/scrapers/base";
+import { logEvent } from "@/lib/agent/observability";
 import type { DiscoveredContact } from "@/types";
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
@@ -278,28 +279,13 @@ interface GrokContactResult {
   reason?: string | null;
 }
 
-const GROK_CONTACT_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    email: { type: ["string", "null"] },
-    alternates: {
-      type: "array",
-      items: { type: "string" },
-    },
-    source_url: { type: ["string", "null"] },
-    reason: { type: ["string", "null"] },
-  },
-  required: ["email", "alternates", "source_url", "reason"],
-};
+const GROK_SYSTEM_PROMPT = `You help a recruiting agency find a working contact email for a company. Use your web search.
 
-const GROK_SYSTEM_PROMPT = `You are a research assistant tasked with finding the best public contact email for a US, UK, or EU company so a recruiting agency can pitch them. You have live web search available. Rules:
-- Search the web for the company's official site and look at /contact, /about, /careers, /press, and footer text.
-- Prefer role-based addresses in this order: careers@, hiring@, jobs@, recruiting@, hr@, people@, talent@, partners@, contact@, hello@, info@.
-- Never invent an email. Only return one you actually saw on the public web.
-- Reject noreply@, postmaster@, abuse@, *@sentry.io, *@wixpress.com, *@indeed.com, *@linkedin.com, *@greenhouse.io, *@lever.co, *@ashbyhq.com, *@workable.com, *@example.com — these are not the employer.
-- If the company appears defunct, missing, or only listed on aggregators, return email: null with a one-sentence reason.
-- Output strictly the JSON shape requested.`;
+- Find ANY plausible public email — careers, hiring, hr, support, sales, contact, hello, info, partnerships, or a personal address listed on the company's site. Anything that actually reaches the company is fine.
+- Don't be picky about role-based vs personal addresses; just return what you find.
+- Only avoid obvious automation noise (noreply@, postmaster@, abuse@, sentry.io, wixpress.com).
+- If you genuinely can't find one after a couple of searches, return email: null. Don't invent.
+- Return ONLY JSON: { "email": "<one email or null>", "alternates": [<other emails you saw>] }. No prose, no markdown.`;
 
 /**
  * Use Grok's built-in web search to find the right outreach email for a
@@ -313,14 +299,13 @@ export async function discoverViaGrok(
   if (!company || company.trim().length < 2) return [];
 
   const userPrompt = [
-    `Find the best public hiring or business-contact email for the company below.`,
+    `Find ANY working contact email for the company below. A generic info@ or hello@ is fine.`,
     ``,
     `Company: ${company}`,
     posting?.title ? `Job title (context): ${posting.title}` : null,
     posting?.url ? `Job posting URL (context): ${posting.url}` : null,
     ``,
-    `Return JSON: { "email": string|null, "alternates": string[], "source_url": string|null, "reason": string|null }.`,
-    `If you can't verify the email exists on a credible page, return email=null.`,
+    `Return JSON only: { "email": "<one email or null>", "alternates": [<other emails>] }`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -333,29 +318,40 @@ export async function discoverViaGrok(
       searchMode: "on",
       maxSearchResults: 6,
       sources: [{ type: "web" }],
-      jsonSchema: GROK_CONTACT_SCHEMA,
-      timeoutMs: 22_000,
+      // No strict schema — Grok refuses too often. Plain JSON object output.
+      timeoutMs: 30_000,
     });
-  } catch {
+  } catch (e) {
+    await logEvent("warn", "Grok single-company HTTP error", {
+      company,
+      error: e instanceof Error ? e.message : String(e),
+    });
     return [];
   }
 
   const payload = result.data;
-  if (!payload) return [];
+  const ordered: string[] = [];
+  if (payload) {
+    if (payload.email) ordered.push(payload.email);
+    if (Array.isArray(payload.alternates)) ordered.push(...payload.alternates);
+  }
+  // Last-resort: bare emails out of the raw text — Grok sometimes answers
+  // in markdown despite the JSON-only instruction.
+  if (ordered.length === 0 && result.raw) {
+    const found = result.raw.match(
+      /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+    );
+    if (found) ordered.push(...found);
+  }
 
   const collected: DiscoveredContact[] = [];
   const seen = new Set<string>();
-  const ordered = [payload.email, ...(payload.alternates ?? [])].filter(
-    (e): e is string => typeof e === "string" && e.length > 0
-  );
-
   for (let i = 0; i < ordered.length; i++) {
     const email = ordered[i].toLowerCase().trim();
     if (seen.has(email)) continue;
-    if (!isUsefulEmail(email)) continue;
+    if (!isAcceptableGrokEmail(email)) continue;
     seen.add(email);
-    // Top result is high-confidence (Grok cited a source); alternates step down.
-    const baseConf = i === 0 ? 0.92 : 0.75 - i * 0.05;
+    const baseConf = i === 0 ? 0.9 : 0.72 - i * 0.04;
     collected.push({
       email,
       sourceType: "scraped_from_site",
@@ -378,37 +374,14 @@ interface GrokBatchResult {
   results: GrokBatchEntry[];
 }
 
-const GROK_BATCH_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    results: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          company: { type: "string" },
-          email: { type: ["string", "null"] },
-          alternates: { type: "array", items: { type: "string" } },
-          source_url: { type: ["string", "null"] },
-          reason: { type: ["string", "null"] },
-        },
-        required: ["company", "email", "alternates", "source_url", "reason"],
-      },
-    },
-  },
-  required: ["results"],
-};
+const GROK_BATCH_SYSTEM_PROMPT = `You help a recruiting agency find a working contact email for each company in a short list.
 
-const GROK_BATCH_SYSTEM_PROMPT = `You are a research assistant tasked with finding the best public contact email for a list of US, UK, or EU companies so a recruiting agency can pitch them. You have live web search available. Rules:
-- Search the web for each company's official site and look at /contact, /about, /careers, /press, and footer text.
-- Prefer role-based addresses in this order: careers@, hiring@, jobs@, recruiting@, hr@, people@, talent@, partners@, contact@, hello@, info@.
-- Never invent an email. Only return one you actually saw on the public web.
-- Reject noreply@, postmaster@, abuse@, *@sentry.io, *@wixpress.com, *@indeed.com, *@linkedin.com, *@greenhouse.io, *@lever.co, *@ashbyhq.com, *@workable.com, *@example.com — these are not the employer.
-- If a company appears defunct, missing, or only listed on aggregators, return email: null with a one-sentence reason in that company's entry.
-- Echo each input company in the "company" field so the caller can match results back.
-- Output strictly the JSON shape requested.`;
+- Use your web search to find ANY plausible public email for the company — careers, hiring, recruiting, hr, support, sales, contact, hello, info, press, partnerships, or even a personal address listed on the company's site. Anything that reaches the company is fine.
+- Don't be picky. If you can see an email associated with the company on a credible-looking page, return it.
+- Only avoid obvious noise: noreply@, postmaster@, abuse@, automated CRM/tracker domains like sentry.io or wixpress.com.
+- If you truly cannot find any email after a couple of searches, return email: null for that entry — don't invent one.
+- Echo the company name back exactly as it was given so we can match results.
+- Return ONLY a JSON object of the shape { "results": [{ "company", "email", "alternates" }] }. No prose, no markdown.`;
 
 /**
  * Bulk Grok lookup: ask Grok to find the right outreach email for up to ~5
@@ -436,73 +409,207 @@ export async function discoverViaGrokBatch(
   const lines = deduped.map(
     (e, i) =>
       `${i + 1}. ${e.company}` +
-      (e.jobTitle ? ` — title: ${e.jobTitle}` : "") +
-      (e.jobUrl ? ` — posting: ${e.jobUrl}` : "")
+      (e.jobTitle ? ` (role: ${e.jobTitle})` : "") +
+      (e.jobUrl ? ` (posting: ${e.jobUrl})` : "")
   );
   const userPrompt =
-    `Find the best public hiring or business-contact email for each company in the list. Return JSON: { "results": [{ "company", "email", "alternates", "source_url", "reason" }, ...] } with one entry per input.\n\n` +
+    `Find ANY working contact email for each company below. Even a generic info@ or hello@ is fine. Return JSON only.\n\n` +
+    `Format: { "results": [{ "company": "<exactly as given>", "email": "<one email or null>", "alternates": [<other emails you saw>] }, ...] }\n\n` +
     `Companies:\n${lines.join("\n")}\n`;
 
-  let res;
+  let res: Awaited<ReturnType<typeof callGrokJson<GrokBatchResult>>>;
   try {
     res = await callGrokJson<GrokBatchResult>({
       system: GROK_BATCH_SYSTEM_PROMPT,
       user: userPrompt,
       searchMode: "on",
       // Each company gets ~1-2 searches; cap the total to keep latency in check.
-      maxSearchResults: Math.min(20, deduped.length * 4),
+      maxSearchResults: Math.min(15, deduped.length * 3),
       sources: [{ type: "web" }],
-      jsonSchema: GROK_BATCH_SCHEMA,
-      // Allow more wall time because Grok may chain several searches.
-      timeoutMs: 45_000,
+      // Intentionally NO json_schema — the strict OpenAI-style schema makes
+      // Grok refuse outright when its scraped data doesn't fit. We let the
+      // model produce a plain JSON object instead, parse what we can, and
+      // even extract bare emails from the raw text as a last resort.
+      timeoutMs: 50_000,
     });
-  } catch {
+  } catch (e) {
+    await logEvent("warn", "Grok batch HTTP error", {
+      batchSize: deduped.length,
+      error: e instanceof Error ? e.message : String(e),
+    });
     return out;
   }
 
-  const payload = res.data;
-  if (!payload || !Array.isArray(payload.results)) return out;
+  // Try the structured payload first.
+  const payload = tryParseGrokBatch(res.raw, res.data);
+  const matched = new Set<string>();
 
-  // Match results back to inputs by name (case-insensitive). If Grok reorders
-  // or renames, do best-effort substring matching against deduped keys.
-  for (const entry of payload.results) {
-    const rawKey = entry.company?.trim().toLowerCase() ?? "";
-    let inputKey: string | undefined;
-    if (rawKey && byCompany.has(rawKey)) {
-      inputKey = rawKey;
-    } else {
-      // Try substring match
-      const keys = Array.from(byCompany.keys());
-      for (const key of keys) {
-        if (key.includes(rawKey) || rawKey.includes(key)) {
-          inputKey = key;
-          break;
+  if (payload && Array.isArray(payload.results)) {
+    const keys = Array.from(byCompany.keys());
+    for (const entry of payload.results) {
+      const rawKey = entry.company?.trim().toLowerCase() ?? "";
+      let inputKey: string | undefined;
+      if (rawKey && byCompany.has(rawKey)) {
+        inputKey = rawKey;
+      } else {
+        for (const key of keys) {
+          if (rawKey && (key.includes(rawKey) || rawKey.includes(key))) {
+            inputKey = key;
+            break;
+          }
+        }
+      }
+      if (!inputKey) continue;
+
+      const ordered = [entry.email, ...(entry.alternates ?? [])].filter(
+        (e): e is string => typeof e === "string" && e.length > 0
+      );
+
+      const contacts = scoreGrokEmails(ordered);
+      if (contacts.length > 0) {
+        const inputCompany = byCompany.get(inputKey)!.company;
+        out.set(inputCompany, contacts);
+        matched.add(inputKey);
+      }
+    }
+  }
+
+  // Salvage pass: for any input company we couldn't satisfy from the
+  // structured payload, scan the raw response for emails that mention the
+  // company anywhere nearby. Grok sometimes writes "Acme — careers@acme.com"
+  // in markdown despite our JSON-only instruction; don't waste it.
+  if (matched.size < byCompany.size) {
+    const harvested = harvestEmailsByCompany(res.raw, byCompany);
+    for (const [inputKey, emails] of Array.from(harvested.entries())) {
+      if (matched.has(inputKey)) continue;
+      const contacts = scoreGrokEmails(emails);
+      if (contacts.length === 0) continue;
+      const inputCompany = byCompany.get(inputKey)!.company;
+      out.set(inputCompany, contacts);
+      matched.add(inputKey);
+    }
+  }
+
+  await logEvent("info", "Grok batch parsed", {
+    requested: deduped.length,
+    matched: matched.size,
+    hadStructuredPayload: !!payload?.results?.length,
+  });
+
+  return out;
+}
+
+/**
+ * Loose filter: drop ONLY obvious automation noise. We deliberately don't
+ * reject job-board / ATS / tracker domains here — Grok occasionally finds
+ * the genuine employer mailbox hosted at a third party (e.g. a small
+ * studio still using a Wix-hosted address), and rejecting them costs us
+ * more leads than we save in noise.
+ */
+function isAcceptableGrokEmail(email: string): boolean {
+  const lower = email.toLowerCase();
+  const local = lower.split("@")[0] ?? "";
+  if (!local || !lower.includes("@")) return false;
+  if (EMAIL_BLOCKLIST_LOCAL.has(local)) return false;
+  if (local.length > 64) return false;
+  return true;
+}
+
+function scoreGrokEmails(ordered: string[]): DiscoveredContact[] {
+  const contacts: DiscoveredContact[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < ordered.length; i++) {
+    const email = ordered[i].toLowerCase().trim();
+    if (seen.has(email)) continue;
+    if (!isAcceptableGrokEmail(email)) continue;
+    seen.add(email);
+    const baseConf = i === 0 ? 0.9 : 0.72 - i * 0.04;
+    contacts.push({
+      email,
+      sourceType: "scraped_from_site",
+      confidence: Math.max(0.5, Math.min(0.95, baseConf)),
+    });
+  }
+  return contacts;
+}
+
+function tryParseGrokBatch(
+  raw: string,
+  parsed: GrokBatchResult | null
+): GrokBatchResult | null {
+  if (parsed && Array.isArray(parsed.results)) return parsed;
+  // Some Grok responses arrive with leading prose or a ```json fence. Strip
+  // a fenced block if present and try to JSON-parse the longest balanced
+  // {...} substring.
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = fenced ? fenced[1] : raw;
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+  try {
+    const obj = JSON.parse(candidate.slice(start, end + 1)) as GrokBatchResult;
+    if (obj && Array.isArray(obj.results)) return obj;
+  } catch {
+    /* swallow */
+  }
+  return null;
+}
+
+/**
+ * If JSON parsing fails entirely, walk the raw text and assign any emails
+ * we find to the company name that appears nearest to them (within a 240-
+ * char window). This is messy but recovers real leads when Grok decides
+ * to answer in prose despite our instructions.
+ */
+function harvestEmailsByCompany(
+  raw: string,
+  byCompany: Map<string, { company: string }>
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  if (!raw) return out;
+  const lower = raw.toLowerCase();
+  const companies = Array.from(byCompany.entries()); // [lowercaseKey, input]
+
+  const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  let match: RegExpExecArray | null;
+  while ((match = emailRe.exec(raw)) !== null) {
+    const email = match[0].toLowerCase();
+    const at = match.index;
+    const windowStart = Math.max(0, at - 240);
+    const windowEnd = Math.min(raw.length, at + 240);
+    const ctx = lower.slice(windowStart, windowEnd);
+
+    // Strong signal: if the email's local-part or domain contains the
+    // company name, that's the right owner regardless of prose proximity.
+    let bestKey: string | null = null;
+    for (const [key] of companies) {
+      const compact = key.replace(/[^a-z0-9]/g, "");
+      if (!compact) continue;
+      if (email.includes(compact)) {
+        bestKey = key;
+        break;
+      }
+    }
+
+    // Fallback: pick the company whose name appears closest in the window.
+    if (!bestKey) {
+      let bestDist = Infinity;
+      for (const [key] of companies) {
+        const idx = ctx.indexOf(key);
+        if (idx === -1) continue;
+        const absIdx = windowStart + idx;
+        const dist = Math.abs(absIdx - at);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestKey = key;
         }
       }
     }
-    if (!inputKey) continue;
 
-    const ordered = [entry.email, ...(entry.alternates ?? [])].filter(
-      (e): e is string => typeof e === "string" && e.length > 0
-    );
-
-    const contacts: DiscoveredContact[] = [];
-    const seen = new Set<string>();
-    for (let i = 0; i < ordered.length; i++) {
-      const email = ordered[i].toLowerCase().trim();
-      if (seen.has(email)) continue;
-      if (!isUsefulEmail(email)) continue;
-      seen.add(email);
-      const baseConf = i === 0 ? 0.92 : 0.75 - i * 0.05;
-      contacts.push({
-        email,
-        sourceType: "scraped_from_site",
-        confidence: Math.max(0.5, Math.min(0.95, baseConf)),
-      });
-    }
-    if (contacts.length > 0) {
-      out.set(byCompany.get(inputKey)!.company, contacts);
-    }
+    if (!bestKey) continue;
+    const list = out.get(bestKey) ?? [];
+    if (!list.includes(email)) list.push(email);
+    out.set(bestKey, list);
   }
   return out;
 }
