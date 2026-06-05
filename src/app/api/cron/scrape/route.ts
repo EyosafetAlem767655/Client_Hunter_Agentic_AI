@@ -10,6 +10,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const summary = await runScrapePipeline();
+  // Cron runs once a day at 06:00 UTC — fire the digest as part of this
+  // run so the user gets the daily summary email automatically.
+  const summary = await runScrapePipeline({ sendDigest: true });
   return NextResponse.json(summary);
 }

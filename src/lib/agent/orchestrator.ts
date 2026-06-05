@@ -28,12 +28,27 @@ async function resolveAgentEnabled(): Promise<boolean> {
   return env.AGENT_ENABLED;
 }
 
-export async function runScrapePipeline(): Promise<PipelineSummary> {
-  return runScrapePipelineFromPostings(null);
+export interface ScrapePipelineOptions {
+  /**
+   * Send the full daily digest email at the end of the run. We default
+   * this OFF for manual triggers (the user can fire it from Settings)
+   * because piling it on top of perception + filter + instant alert
+   * pushes the wall-time over Vercel Hobby's 60 s function ceiling.
+   * The 06:00 UTC cron passes `true` so the daily summary still goes
+   * out automatically once a day.
+   */
+  sendDigest?: boolean;
+}
+
+export async function runScrapePipeline(
+  options: ScrapePipelineOptions = {}
+): Promise<PipelineSummary> {
+  return runScrapePipelineFromPostings(null, options);
 }
 
 export async function runScrapePipelineFromPostings(
-  preloadedPostings: RawPosting[] | null
+  preloadedPostings: RawPosting[] | null,
+  options: ScrapePipelineOptions = {}
 ): Promise<PipelineSummary> {
   const start = Date.now();
   let runId = -1;
@@ -73,6 +88,14 @@ export async function runScrapePipelineFromPostings(
     processed += perception.scraped;
     succeeded += perception.inserted;
 
+    // Time-aware budget. Vercel Hobby caps each function at 60 s, so we
+    // hard-stop the pipeline at ~55 s of wall-time to give the response
+    // a chance to come back. Per-phase guards skip work that almost
+    // certainly won't finish, instead of running into the ceiling and
+    // returning HTTP 504 with nothing persisted.
+    const deadlineMs = start + 55_000;
+    const timeLeft = () => deadlineMs - Date.now();
+
     const filter = await filterPendingPostings(CRON_POSTING_LIMIT);
     processed += filter.processed;
     succeeded += filter.succeeded;
@@ -80,12 +103,36 @@ export async function runScrapePipelineFromPostings(
     const dryRun = await resolveDryRun();
 
     // Instant alert: fire one email per scrape run that surfaces a VA or
-    // VA-similar match the LLM just classified. Skipped when there were
-    // zero new matches.
-    const alert = await sendInstantVaAlert(filter.newMatches, { dryRun });
+    // VA-similar match the LLM just classified. Cheap — single SMTP send.
+    let alert: Awaited<ReturnType<typeof sendInstantVaAlert>> = {
+      sent: false,
+      count: 0,
+      dryRun,
+    };
+    if (timeLeft() > 6_000) {
+      alert = await sendInstantVaAlert(filter.newMatches, { dryRun });
+    } else {
+      await logEvent("warn", "Skipping instant alert — budget tight", {
+        timeLeftMs: timeLeft(),
+      });
+    }
 
-    // End-of-day digest of all matches found today.
-    const digest = await sendDailyDigest({ dryRun });
+    // Daily digest is the bigger SMTP payload — multiple DB joins, HTML
+    // render, sendMail. Only fire it when explicitly asked (cron) and
+    // there's time. Manual scrapes leave it for the dedicated
+    // /api/manual/digest endpoint so they always come back under budget.
+    let digest: Awaited<ReturnType<typeof sendDailyDigest>> = {
+      sent: false,
+      count: 0,
+      dryRun,
+    };
+    if (options.sendDigest && timeLeft() > 8_000) {
+      digest = await sendDailyDigest({ dryRun });
+    } else if (options.sendDigest) {
+      await logEvent("warn", "Skipping digest — budget tight", {
+        timeLeftMs: timeLeft(),
+      });
+    }
 
     // NB: Grok contact discovery + draft + send used to run here too, but
     // 80+ scraped postings push the combined pipeline past the Vercel

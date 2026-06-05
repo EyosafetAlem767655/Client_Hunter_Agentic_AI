@@ -48,8 +48,9 @@ describe("pipeline integration", () => {
     vi.clearAllMocks();
   });
 
-  it("runs scrape pipeline end-to-end with mocks (no draft/send — those moved to outreach)", async () => {
+  it("runs scrape pipeline end-to-end with mocks (no draft/send/digest by default)", async () => {
     const { runScrapePipeline } = await import("@/lib/agent/orchestrator");
+    const digest = await import("@/lib/email/digest");
     const action = await import("@/lib/agent/action");
     const summary = await runScrapePipeline();
     expect(summary.runId).toBe(1);
@@ -67,6 +68,17 @@ describe("pipeline integration", () => {
     expect(action.draftEmailsForContacts).not.toHaveBeenCalled();
     expect(action.sendApprovedEmails).not.toHaveBeenCalled();
     expect(action.discoverContactsForTopJobs).not.toHaveBeenCalled();
+    // Digest is OFF by default — manual scrape route relies on that
+    // to stay under the Vercel Hobby 60 s budget.
+    expect(digest.sendDailyDigest).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("scrape pipeline sends digest when sendDigest: true (cron path)", async () => {
+    const { runScrapePipeline } = await import("@/lib/agent/orchestrator");
+    const digest = await import("@/lib/email/digest");
+    vi.mocked(digest.sendDailyDigest).mockClear();
+    await runScrapePipeline({ sendDigest: true });
+    expect(digest.sendDailyDigest).toHaveBeenCalled();
   }, 15_000);
 
   it("runs outreach pipeline end-to-end (discovery + draft + send) in dry run", async () => {

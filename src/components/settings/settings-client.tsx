@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  FileText,
   KeyRound,
   Loader2,
   Mail,
@@ -435,7 +436,9 @@ export function SettingsClient({
             <code className="rounded bg-muted px-1 font-mono">grok-4-fast-reasoning</code>
             ) for the company&apos;s email — one at a time, with a short rest
             between calls. Each request finishes in well under 60 s so it never
-            trips the Vercel Hobby timeout.
+            trips the Vercel Hobby timeout. <strong>Use this as the fallback
+            whenever a Run scrape + outreach above hits HTTP 504</strong> — the
+            scrape may have completed but contact discovery didn&apos;t.
           </p>
           {(() => {
             const total = discoveryProgress?.totalRelevant ?? 0;
@@ -550,6 +553,15 @@ export function SettingsClient({
                 onClick={() => runManual("/api/manual/test-email", "Test email")}
                 icon={<Send className="h-5 w-5" />}
                 gradient="from-emerald-500/30 to-teal-500/20"
+              />
+              <ActionTile
+                title="Send digest now"
+                description="Fire the daily VA digest email immediately. Decoupled from the scrape so it doesn't cost Vercel function time during the run. Respects DRY_RUN."
+                disabled={loading !== null}
+                loading={loading === "Digest"}
+                onClick={() => runManual("/api/manual/digest", "Digest")}
+                icon={<FileText className="h-5 w-5" />}
+                gradient="from-amber-500/30 to-orange-500/20"
               />
               <ActionTile
                 title="Reset all data"
