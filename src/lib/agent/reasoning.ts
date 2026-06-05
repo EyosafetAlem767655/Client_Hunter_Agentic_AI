@@ -14,12 +14,32 @@ import { sha256Hex } from "@/lib/hash";
 import { memory } from "./memory";
 import { logEvent } from "./observability";
 
+export interface FilterRunResult {
+  processed: number;
+  succeeded: number;
+  /** Newly-classified relevant matches in this run (used for instant alerts). */
+  newMatches: NewMatch[];
+}
+
+export interface NewMatch {
+  postingId: number;
+  title: string;
+  company: string;
+  location: string;
+  url: string;
+  score: number;
+  roleCategory: string | null;
+  fitReason: string | null;
+  estimatedSalaryRange: string | null;
+}
+
 export async function filterPendingPostings(
   limit: number
-): Promise<{ processed: number; succeeded: number }> {
+): Promise<FilterRunResult> {
   const pending = await memory.listUnfilteredPostings(limit);
   let processed = 0;
   let succeeded = 0;
+  const newMatches: NewMatch[] = [];
 
   for (let i = 0; i < pending.length; i += FILTER_BATCH_SIZE) {
     const batch = pending.slice(i, i + FILTER_BATCH_SIZE);
@@ -81,10 +101,24 @@ export async function filterPendingPostings(
         promptVersion: PROMPT_VERSION,
       });
       succeeded++;
+
+      if (job.isRelevant) {
+        newMatches.push({
+          postingId: posting.id,
+          title: posting.title,
+          company: posting.company,
+          location: posting.location,
+          url: posting.url,
+          score: Math.round(job.score),
+          roleCategory: job.roleCategory,
+          fitReason: job.fitReason,
+          estimatedSalaryRange: job.estimatedSalaryRange,
+        });
+      }
     }
   }
 
-  return { processed, succeeded };
+  return { processed, succeeded, newMatches };
 }
 
 export { parseFilteredBatch, FALLBACK_FILTERED };

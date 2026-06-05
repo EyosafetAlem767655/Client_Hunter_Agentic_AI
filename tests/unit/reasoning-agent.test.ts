@@ -46,10 +46,13 @@ describe("reasoning agent", () => {
     vi.clearAllMocks();
   });
 
-  it("filters pending postings via LLM", async () => {
+  it("filters pending postings via LLM and surfaces new VA matches", async () => {
     const { filterPendingPostings } = await import("@/lib/agent/reasoning");
     const result = await filterPendingPostings(5);
     expect(result.processed).toBe(1);
     expect(result.succeeded).toBe(1);
+    expect(result.newMatches).toHaveLength(1);
+    expect(result.newMatches[0].postingId).toBe(1);
+    expect(result.newMatches[0].score).toBe(90);
   }, 15_000);
 });

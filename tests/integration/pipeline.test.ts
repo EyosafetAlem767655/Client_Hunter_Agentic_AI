@@ -25,7 +25,9 @@ vi.mock("@/lib/agent/perception", () => ({
   ingestPostings: vi.fn().mockResolvedValue({ scraped: 2, inserted: 1 }),
 }));
 vi.mock("@/lib/agent/reasoning", () => ({
-  filterPendingPostings: vi.fn().mockResolvedValue({ processed: 0, succeeded: 0 }),
+  filterPendingPostings: vi
+    .fn()
+    .mockResolvedValue({ processed: 0, succeeded: 0, newMatches: [] }),
 }));
 vi.mock("@/lib/agent/action", () => ({
   discoverContactsForTopJobs: vi.fn().mockResolvedValue(0),
@@ -34,6 +36,9 @@ vi.mock("@/lib/agent/action", () => ({
 }));
 vi.mock("@/lib/email/digest", () => ({
   sendDailyDigest: vi
+    .fn()
+    .mockResolvedValue({ sent: false, count: 0, dryRun: true }),
+  sendInstantVaAlert: vi
     .fn()
     .mockResolvedValue({ sent: false, count: 0, dryRun: true }),
 }));

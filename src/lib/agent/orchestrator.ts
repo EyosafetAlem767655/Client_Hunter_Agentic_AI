@@ -12,7 +12,7 @@ import { memory } from "./memory";
 import { runPerception } from "./perception";
 import { filterPendingPostings } from "./reasoning";
 import { setRunId, logEvent } from "./observability";
-import { sendDailyDigest } from "@/lib/email/digest";
+import { sendDailyDigest, sendInstantVaAlert } from "@/lib/email/digest";
 import type { RawPosting } from "@/types";
 import type { PipelineSummary } from "@/types";
 
@@ -77,19 +77,32 @@ export async function runScrapePipelineFromPostings(
     processed += filter.processed;
     succeeded += filter.succeeded;
 
+    const dryRun = await resolveDryRun();
+
+    // Instant alert: fire one email per scrape run that surfaces a VA or
+    // VA-similar match the LLM just classified. Skipped when there were
+    // zero new matches.
+    const alert = await sendInstantVaAlert(filter.newMatches, { dryRun });
+
     const discovered = await discoverContactsForTopJobs(20);
     succeeded += discovered;
     processed += discovered;
 
-    // Send the daily digest to CONTACT_EMAIL summarising VA matches.
-    const dryRun = await resolveDryRun();
+    // End-of-day digest of all matches found today (cron pass at 06:00 UTC
+    // will fire this once a day; manual scrapes during the day still get
+    // the instant alert above).
     const digest = await sendDailyDigest({ dryRun });
 
     if (runId !== -1) {
       try {
         await memory.finishAgentRun(runId, "completed", {
           perception,
-          filter,
+          filter: {
+            processed: filter.processed,
+            succeeded: filter.succeeded,
+            newMatchCount: filter.newMatches.length,
+          },
+          alert,
           discovered,
           digest,
         });
