@@ -84,32 +84,16 @@ export async function runScrapePipelineFromPostings(
     // zero new matches.
     const alert = await sendInstantVaAlert(filter.newMatches, { dryRun });
 
-    const discovered = await discoverContactsForTopJobs(20);
-    succeeded += discovered;
-    processed += discovered;
-
-    // End-to-end outreach: draft personalized emails for the contacts we
-    // just discovered, then immediately try to deliver them. Both manual
-    // and cron paths go through this so the user no longer has to wait
-    // for the 14:00 UTC outreach cron to push the day's leads.
-    const agentEnabled = await resolveAgentEnabled();
-    const drafted = await draftEmailsForContacts(CRON_EMAIL_LIMIT, dryRun);
-    processed += drafted;
-    succeeded += drafted;
-
-    const sendOutcome = await sendApprovedEmails(
-      CRON_EMAIL_LIMIT,
-      dryRun,
-      agentEnabled
-    );
-    processed += sendOutcome.sent + sendOutcome.failed;
-    succeeded += sendOutcome.sent;
-    failed += sendOutcome.failed;
-
-    // End-of-day digest of all matches found today (cron pass at 06:00 UTC
-    // will fire this once a day; manual scrapes during the day still get
-    // the instant alert above).
+    // End-of-day digest of all matches found today.
     const digest = await sendDailyDigest({ dryRun });
+
+    // NB: Grok contact discovery + draft + send used to run here too, but
+    // 80+ scraped postings push the combined pipeline past the Vercel
+    // Hobby 60 s function ceiling (HTTP 504). Discovery is the slow step
+    // (Grok chains 3-5 searches per company), so it now lives in
+    // runOutreachPipeline instead. The manual scrape UI chains a call to
+    // /api/manual/outreach immediately after, and the 14:00 UTC outreach
+    // cron picks anything up that's still pending.
 
     if (runId !== -1) {
       try {
@@ -121,9 +105,6 @@ export async function runScrapePipelineFromPostings(
             newMatchCount: filter.newMatches.length,
           },
           alert,
-          discovered,
-          drafted,
-          send: sendOutcome,
           digest,
         });
       } catch (e) {
@@ -178,22 +159,58 @@ export async function runOutreachPipeline(): Promise<PipelineSummary> {
   let failed = 0;
 
   try {
-    const drafted = await draftEmailsForContacts(CRON_EMAIL_LIMIT, dryRun);
-    processed += drafted;
-    succeeded += drafted;
+    // Time-aware budget: Vercel Hobby caps this function at 60 s. Each step
+    // bails out early if the remaining wall-time is too small for it to
+    // realistically finish — better to ship partial results than 504.
+    const deadlineMs = start + 55_000;
+    const timeLeft = () => deadlineMs - Date.now();
 
-    const send = await sendApprovedEmails(
-      CRON_EMAIL_LIMIT,
-      dryRun,
-      agentEnabled
-    );
-    processed += send.sent + send.failed;
-    succeeded += send.sent;
-    failed += send.failed;
+    // Phase 1: Grok / DDG / on-site contact discovery for top jobs that
+    // are still missing a contact. Each Grok batch is ~15-20 s, so we cap
+    // the per-call job count by remaining time.
+    let discovered = 0;
+    if (timeLeft() > 25_000) {
+      const slot = Math.min(15, Math.floor(timeLeft() / 3_000));
+      discovered = await discoverContactsForTopJobs(slot);
+      processed += discovered;
+      succeeded += discovered;
+    } else {
+      await logEvent("warn", "Outreach: skipping discovery — budget tight", {
+        timeLeftMs: timeLeft(),
+      });
+    }
+
+    // Phase 2: draft personalized emails for the contacts we now have.
+    let drafted = 0;
+    if (timeLeft() > 12_000) {
+      const slot = Math.min(CRON_EMAIL_LIMIT, Math.floor(timeLeft() / 2_500));
+      drafted = await draftEmailsForContacts(slot, dryRun);
+      processed += drafted;
+      succeeded += drafted;
+    } else {
+      await logEvent("warn", "Outreach: skipping draft — budget tight", {
+        timeLeftMs: timeLeft(),
+      });
+    }
+
+    // Phase 3: actually deliver via SMTP.
+    let send = { sent: 0, failed: 0 };
+    if (timeLeft() > 4_000) {
+      const slot = Math.min(CRON_EMAIL_LIMIT, Math.floor(timeLeft() / 1_500));
+      send = await sendApprovedEmails(slot, dryRun, agentEnabled);
+      processed += send.sent + send.failed;
+      succeeded += send.sent;
+      failed += send.failed;
+    } else {
+      await logEvent("warn", "Outreach: skipping send — budget tight", {
+        timeLeftMs: timeLeft(),
+      });
+    }
 
     if (runId !== -1) {
       try {
         await memory.finishAgentRun(runId, "completed", {
+          discovered,
           drafted,
           send,
           dryRun,

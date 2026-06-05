@@ -86,10 +86,34 @@ export function SettingsClient({
     showToast("ok", "Setting updated");
   }
 
+  async function runOne(
+    path: string,
+    label: string
+  ): Promise<{ ok: boolean; data: Record<string, unknown>; error?: string }> {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token.trim()}` },
+    });
+    let data: Record<string, unknown> = {};
+    try {
+      data = await res.json();
+    } catch {
+      // ignore parse error
+    }
+    if (!res.ok) {
+      return {
+        ok: false,
+        data,
+        error: (data?.error as string) ?? `${label} ${res.status}`,
+      };
+    }
+    return { ok: true, data };
+  }
+
   async function runManual(
     path: string,
     label: string,
-    opts: { confirm?: string } = {}
+    opts: { confirm?: string; chain?: { path: string; label: string } } = {}
   ) {
     if (!token.trim()) {
       showToast(
@@ -103,24 +127,46 @@ export function SettingsClient({
     }
     setLoading(label);
     try {
-      const res = await fetch(path, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token.trim()}` },
-      });
-      let data: Record<string, unknown> = {};
-      try {
-        data = await res.json();
-      } catch {
-        // ignore parse error
-      }
-      if (!res.ok) {
-        const err = (data?.error as string) ?? `HTTP ${res.status}`;
-        setLastRun({ label, ok: false, error: err, at: Date.now() });
-        showToast("err", `${label} failed: ${err}`);
+      // Step 1: the user-requested action.
+      const first = await runOne(path, label);
+      if (!first.ok) {
+        setLastRun({ label, ok: false, error: first.error, at: Date.now() });
+        showToast("err", `${label} failed: ${first.error}`);
         return;
       }
-      setLastRun({ label, ok: true, data, at: Date.now() });
-      showToast("ok", `${label} complete`);
+
+      if (!opts.chain) {
+        setLastRun({ label, ok: true, data: first.data, at: Date.now() });
+        showToast("ok", `${label} complete`);
+        return;
+      }
+
+      // Step 2: chained follow-up (e.g. scrape → outreach). Vercel Hobby
+      // caps each function at 60 s, so the heavy Grok-discovery + draft +
+      // send work runs as its OWN HTTP call. The UI fires it the moment
+      // the scrape returns so the user gets the full end-to-end behaviour
+      // without busting the timeout.
+      setLoading(opts.chain.label);
+      showToast("ok", `${label} done — running ${opts.chain.label}…`);
+      const second = await runOne(opts.chain.path, opts.chain.label);
+      if (!second.ok) {
+        setLastRun({
+          label: `${label} + ${opts.chain.label}`,
+          ok: false,
+          error: `${opts.chain.label} step failed: ${second.error}`,
+          at: Date.now(),
+          data: { scrape: first.data },
+        });
+        showToast("err", `${opts.chain.label} failed: ${second.error}`);
+        return;
+      }
+      setLastRun({
+        label: `${label} + ${opts.chain.label}`,
+        ok: true,
+        data: { scrape: first.data, outreach: second.data },
+        at: Date.now(),
+      });
+      showToast("ok", `${label} + ${opts.chain.label} complete`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Request failed";
       setLastRun({ label, ok: false, error: msg, at: Date.now() });
@@ -226,11 +272,15 @@ export function SettingsClient({
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <ActionTile
-                title="Run scrape now"
-                description="Fetch VA jobs, score with the LLM, discover contacts, and email the digest + instant alerts."
+                title="Run scrape + outreach"
+                description="Two-step run: scrapes + scores jobs (≈30 s), then chains an outreach call that finds contact emails via Grok and sends drafts. Each step gets its own Vercel 60 s budget so the pipeline can't 504."
                 disabled={loading !== null}
-                loading={loading === "Scrape"}
-                onClick={() => runManual("/api/manual/scrape", "Scrape")}
+                loading={loading === "Scrape" || loading === "Outreach"}
+                onClick={() =>
+                  runManual("/api/manual/scrape", "Scrape", {
+                    chain: { path: "/api/manual/outreach", label: "Outreach" },
+                  })
+                }
                 icon={<Play className="h-5 w-5" />}
                 gradient="from-violet-500/30 to-fuchsia-500/20"
                 primary

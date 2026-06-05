@@ -424,13 +424,15 @@ export async function discoverViaGrokBatch(
       user: userPrompt,
       searchMode: "on",
       // Each company gets ~1-2 searches; cap the total to keep latency in check.
-      maxSearchResults: Math.min(15, deduped.length * 3),
+      maxSearchResults: Math.min(12, deduped.length * 3),
       sources: [{ type: "web" }],
       // Intentionally NO json_schema — the strict OpenAI-style schema makes
       // Grok refuse outright when its scraped data doesn't fit. We let the
       // model produce a plain JSON object instead, parse what we can, and
       // even extract bare emails from the raw text as a last resort.
-      timeoutMs: 50_000,
+      // 22 s per batch × concurrency 4 keeps the discovery phase under
+      // ~30 s wall-time even when batches stall.
+      timeoutMs: 22_000,
     });
   } catch (e) {
     await logEvent("warn", "Grok batch HTTP error", {

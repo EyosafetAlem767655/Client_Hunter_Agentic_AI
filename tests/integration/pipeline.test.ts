@@ -48,7 +48,7 @@ describe("pipeline integration", () => {
     vi.clearAllMocks();
   });
 
-  it("runs scrape pipeline end-to-end with mocks", async () => {
+  it("runs scrape pipeline end-to-end with mocks (no draft/send — those moved to outreach)", async () => {
     const { runScrapePipeline } = await import("@/lib/agent/orchestrator");
     const action = await import("@/lib/agent/action");
     const summary = await runScrapePipeline();
@@ -59,25 +59,27 @@ describe("pipeline integration", () => {
       "completed",
       expect.objectContaining({
         perception: expect.objectContaining({ scraped: 2 }),
-        drafted: 0,
-        send: expect.objectContaining({ sent: 0, failed: 0 }),
       })
     );
-    // The scrape pipeline now also runs draft + send so the user doesn't
-    // have to wait for the 14:00 UTC outreach cron.
-    expect(action.draftEmailsForContacts).toHaveBeenCalled();
-    expect(action.sendApprovedEmails).toHaveBeenCalled();
+    // Vercel Hobby has a 60 s function ceiling; discover + draft + send
+    // were moved to runOutreachPipeline so the scrape can finish under
+    // budget. The UI chains the outreach call after a successful scrape.
+    expect(action.draftEmailsForContacts).not.toHaveBeenCalled();
+    expect(action.sendApprovedEmails).not.toHaveBeenCalled();
+    expect(action.discoverContactsForTopJobs).not.toHaveBeenCalled();
   }, 15_000);
 
-  it("runs outreach pipeline without sending in dry run", async () => {
+  it("runs outreach pipeline end-to-end (discovery + draft + send) in dry run", async () => {
     const { runOutreachPipeline } = await import("@/lib/agent/orchestrator");
-    const { sendApprovedEmails } = await import("@/lib/agent/action");
+    const action = await import("@/lib/agent/action");
     const summary = await runOutreachPipeline();
-    expect(sendApprovedEmails).toHaveBeenCalledWith(
+    expect(summary.runId).toBe(1);
+    expect(action.discoverContactsForTopJobs).toHaveBeenCalled();
+    expect(action.draftEmailsForContacts).toHaveBeenCalled();
+    expect(action.sendApprovedEmails).toHaveBeenCalledWith(
       expect.any(Number),
       true,
       expect.any(Boolean)
     );
-    expect(summary.runId).toBe(1);
   });
 });
