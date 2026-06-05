@@ -31,6 +31,9 @@ vi.mock("@/lib/agent/reasoning", () => ({
 }));
 vi.mock("@/lib/agent/action", () => ({
   discoverContactsForTopJobs: vi.fn().mockResolvedValue(0),
+  discoverNextContacts: vi
+    .fn()
+    .mockResolvedValue({ attempted: 0, found: 0, results: [] }),
   draftEmailsForContacts: vi.fn().mockResolvedValue(0),
   sendApprovedEmails: vi.fn().mockResolvedValue({ sent: 0, failed: 0 }),
 }));
@@ -81,12 +84,15 @@ describe("pipeline integration", () => {
     expect(digest.sendDailyDigest).toHaveBeenCalled();
   }, 15_000);
 
-  it("runs outreach pipeline end-to-end (discovery + draft + send) in dry run", async () => {
+  it("runs outreach pipeline end-to-end (1-by-1 discovery + draft + send) in dry run", async () => {
     const { runOutreachPipeline } = await import("@/lib/agent/orchestrator");
     const action = await import("@/lib/agent/action");
     const summary = await runOutreachPipeline();
     expect(summary.runId).toBe(1);
-    expect(action.discoverContactsForTopJobs).toHaveBeenCalled();
+    // Outreach now drives discovery one company at a time via
+    // discoverNextContacts(1), not the big-batch discoverContactsForTopJobs.
+    expect(action.discoverNextContacts).toHaveBeenCalled();
+    expect(action.discoverContactsForTopJobs).not.toHaveBeenCalled();
     expect(action.draftEmailsForContacts).toHaveBeenCalled();
     expect(action.sendApprovedEmails).toHaveBeenCalledWith(
       expect.any(Number),

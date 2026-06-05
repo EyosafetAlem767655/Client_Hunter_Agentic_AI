@@ -66,6 +66,7 @@ export async function runScrapePipelineFromPostings(
   let processed = 0;
   let succeeded = 0;
   let failed = 0;
+  let pipelineStats: Record<string, number> | undefined;
 
   try {
     let perception: {
@@ -142,6 +143,13 @@ export async function runScrapePipelineFromPostings(
     // /api/manual/outreach immediately after, and the 14:00 UTC outreach
     // cron picks anything up that's still pending.
 
+    pipelineStats = {
+      scraped: perception.scraped,
+      inserted: perception.inserted,
+      filterProcessed: filter.processed,
+      relevant: filter.newMatches.length,
+    };
+
     if (runId !== -1) {
       try {
         await memory.finishAgentRun(runId, "completed", {
@@ -184,6 +192,7 @@ export async function runScrapePipelineFromPostings(
     succeeded,
     failed,
     durationMs: Date.now() - start,
+    stats: pipelineStats,
   };
 }
 
@@ -212,18 +221,28 @@ export async function runOutreachPipeline(): Promise<PipelineSummary> {
     const deadlineMs = start + 55_000;
     const timeLeft = () => deadlineMs - Date.now();
 
-    // Phase 1: Grok / DDG / on-site contact discovery for top jobs that
-    // are still missing a contact. Each Grok batch is ~15-20 s, so we cap
-    // the per-call job count by remaining time.
+    // Phase 1: contact discovery, one company at a time. We loop calling
+    // discoverNextContacts(1) until the budget runs out. The 30 s rest
+    // the manual UI imposes between calls isn't realistic from a cron
+    // function (60 s budget total), so cron uses a much shorter 2 s rest
+    // — still enough to be polite to xAI without blowing past the
+    // function ceiling. The manual UI in Settings enforces the 30 s
+    // rest itself.
+    const { discoverNextContacts } = await import("./action");
     let discovered = 0;
-    if (timeLeft() > 25_000) {
-      const slot = Math.min(15, Math.floor(timeLeft() / 3_000));
-      discovered = await discoverContactsForTopJobs(slot);
-      processed += discovered;
-      succeeded += discovered;
-    } else {
-      await logEvent("warn", "Outreach: skipping discovery — budget tight", {
+    while (timeLeft() > 12_000) {
+      const step = await discoverNextContacts(1);
+      if (step.attempted === 0) break; // nothing left
+      discovered += step.found;
+      processed += step.attempted;
+      succeeded += step.found;
+      if (timeLeft() < 4_000) break;
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+    if (timeLeft() <= 12_000) {
+      await logEvent("warn", "Outreach: stopping discovery — budget tight", {
         timeLeftMs: timeLeft(),
+        discovered,
       });
     }
 

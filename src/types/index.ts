@@ -50,4 +50,6 @@ export interface PipelineSummary {
   succeeded: number;
   failed: number;
   durationMs: number;
+  /** Pipeline-specific extras (e.g. relevant count from a scrape). */
+  stats?: Record<string, number>;
 }

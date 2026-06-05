@@ -62,6 +62,10 @@ export function SettingsClient({
   >([]);
   // Use a ref so the loop can be cancelled mid-flight.
   const stopDiscoveryRef = useState<{ current: boolean }>({ current: false })[0];
+  // Seconds remaining on the post-scrape "settle" countdown before the
+  // 1-by-1 email loop auto-starts. null = no countdown active.
+  const [scrapeCountdown, setScrapeCountdown] = useState<number | null>(null);
+  const cancelCountdownRef = useState<{ current: boolean }>({ current: false })[0];
 
   useEffect(() => {
     const saved = sessionStorage.getItem(TOKEN_KEY);
@@ -159,7 +163,11 @@ export function SettingsClient({
   async function runManual(
     path: string,
     label: string,
-    opts: { confirm?: string; chain?: { path: string; label: string } } = {}
+    opts: {
+      confirm?: string;
+      chain?: { path: string; label: string };
+      after?: (data: Record<string, unknown>) => void | Promise<void>;
+    } = {}
   ) {
     if (!token.trim()) {
       showToast(
@@ -184,6 +192,18 @@ export function SettingsClient({
       if (!opts.chain) {
         setLastRun({ label, ok: true, data: first.data, at: Date.now() });
         showToast("ok", `${label} complete`);
+        if (opts.after) {
+          try {
+            await opts.after(first.data);
+          } catch (e) {
+            showToast(
+              "err",
+              `Post-${label} step failed: ${
+                e instanceof Error ? e.message : String(e)
+              }`
+            );
+          }
+        }
         return;
       }
 
@@ -300,8 +320,10 @@ export function SettingsClient({
           showToast("ok", "All companies processed");
           break;
         }
-        // Let Grok rest between calls so we don't hammer xAI.
-        await new Promise((r) => setTimeout(r, 1_200));
+        // 30 s rest between Grok calls per the requested spec — gives
+        // xAI breathing room and keeps each cycle obviously within
+        // the Vercel function budget.
+        await new Promise((r) => setTimeout(r, 30_000));
       }
     } finally {
       setDiscoveryActive(false);
@@ -312,6 +334,33 @@ export function SettingsClient({
   function stopDiscoveryLoop() {
     stopDiscoveryRef.current = true;
     showToast("ok", "Stopping after the current company…");
+  }
+
+  /**
+   * Per spec: after a successful scrape, wait 60 s so the LLM filter
+   * commits have settled, then auto-start the 1-by-1 email loop. The
+   * countdown can be cancelled if the user wants to do something else.
+   */
+  async function scheduleEmailLoopAfterScrape() {
+    cancelCountdownRef.current = false;
+    for (let s = 60; s > 0; s--) {
+      if (cancelCountdownRef.current) {
+        setScrapeCountdown(null);
+        return;
+      }
+      setScrapeCountdown(s);
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    setScrapeCountdown(null);
+    if (!discoveryActive) {
+      await startDiscoveryLoop();
+    }
+  }
+
+  function cancelCountdown() {
+    cancelCountdownRef.current = true;
+    setScrapeCountdown(null);
+    showToast("ok", "Auto-discovery cancelled — use the button when ready.");
   }
 
   return (
@@ -395,6 +444,32 @@ export function SettingsClient({
         </div>
       )}
 
+      {/* Post-scrape countdown */}
+      {scrapeCountdown !== null && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-violet-500/40 bg-violet-500/10 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin text-violet-300" />
+            <div>
+              <div className="text-sm font-medium text-violet-100">
+                Auto-starting email discovery in {scrapeCountdown}s
+              </div>
+              <div className="text-xs text-violet-200/80">
+                Lets the LLM filter commits settle before Grok looks up the
+                relevant companies, one at a time.
+              </div>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={cancelCountdown}
+            className="border-violet-400/40 text-violet-200 hover:bg-violet-500/10"
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
+
       {/* Contact discovery 1-by-1 */}
       <Card className="glass-card border-primary/20">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 gap-2">
@@ -434,11 +509,11 @@ export function SettingsClient({
             Walks through every relevant job that still needs a contact and
             asks Grok (model{" "}
             <code className="rounded bg-muted px-1 font-mono">grok-4-fast-reasoning</code>
-            ) for the company&apos;s email — one at a time, with a short rest
-            between calls. Each request finishes in well under 60 s so it never
-            trips the Vercel Hobby timeout. <strong>Use this as the fallback
-            whenever a Run scrape + outreach above hits HTTP 504</strong> — the
-            scrape may have completed but contact discovery didn&apos;t.
+            ) for the company&apos;s email — one at a time, with a{" "}
+            <strong>30-second rest</strong> between calls. Each request
+            finishes well under 60 s so it never trips the Vercel Hobby
+            timeout. <strong>Runs automatically 60 s after a scrape;</strong>{" "}
+            you can also kick it off here whenever you want.
           </p>
           {(() => {
             const total = discoveryProgress?.totalRelevant ?? 0;
@@ -478,20 +553,32 @@ export function SettingsClient({
           })()}
           {discoveryLog.length > 0 && (
             <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border/30 bg-background/40 p-3 text-xs">
-              <div className="mb-1 text-muted-foreground">Recent finds:</div>
+              <div className="mb-1 flex items-center justify-between text-muted-foreground">
+                <span>Recent finds:</span>
+                <a
+                  href="/jobs?status=with-contact&window=all"
+                  className="text-violet-300 hover:text-violet-200 underline-offset-2 hover:underline"
+                >
+                  View all contacts →
+                </a>
+              </div>
               {discoveryLog.map((row, i) => (
                 <div
                   key={`${row.company}-${i}`}
                   className="flex items-center justify-between gap-3"
                 >
-                  <span className="truncate">
+                  <a
+                    href={`/jobs?status=with-contact&window=all`}
+                    className="truncate transition hover:text-violet-200"
+                    title={`Open ${row.company} in the jobs list`}
+                  >
                     <span className="font-medium">{row.company}</span>
                     {row.method && (
                       <span className="ml-2 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-violet-300">
                         {row.method}
                       </span>
                     )}
-                  </span>
+                  </a>
                   <span
                     className={
                       row.email
@@ -523,13 +610,52 @@ export function SettingsClient({
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <ActionTile
-                title="Run scrape + outreach"
-                description="Two-step run: scrapes + scores jobs (≈30 s), then chains an outreach call that finds contact emails via Grok and sends drafts. Each step gets its own Vercel 60 s budget so the pipeline can't 504."
-                disabled={loading !== null}
-                loading={loading === "Scrape" || loading === "Outreach"}
+                title="Run scrape + filter"
+                description="Scrapes job boards and runs the OpenAI filter. When it returns, a 60-second countdown starts and the 1-by-1 email loop kicks off automatically (30-second rest between Grok calls). You can cancel the countdown if you want to do something else first."
+                disabled={loading !== null || scrapeCountdown !== null}
+                loading={loading === "Scrape"}
                 onClick={() =>
                   runManual("/api/manual/scrape", "Scrape", {
-                    chain: { path: "/api/manual/outreach", label: "Outreach" },
+                    after: async (data) => {
+                      const relevant =
+                        (data?.stats as { relevant?: number } | undefined)
+                          ?.relevant ?? null;
+                      // Refresh the discovery progress so the bar shows
+                      // the new pending count immediately.
+                      try {
+                        const res = await fetch(
+                          "/api/manual/discover/status",
+                          {
+                            headers: {
+                              Authorization: `Bearer ${token.trim()}`,
+                            },
+                          }
+                        );
+                        if (res.ok) {
+                          const p = await res.json();
+                          if (p?.ok) {
+                            setDiscoveryProgress({
+                              totalRelevant: p.totalRelevant ?? 0,
+                              withContacts: p.withContacts ?? 0,
+                              pending: p.pending ?? 0,
+                              nextCompany: p.nextCompany ?? null,
+                            });
+                          }
+                        }
+                      } catch {
+                        /* swallow */
+                      }
+                      showToast(
+                        "ok",
+                        `Scrape done${
+                          relevant !== null
+                            ? ` · ${relevant} relevant`
+                            : ""
+                        } — auto-discovery in 60 s`
+                      );
+                      // Don't block the response — fire and forget.
+                      void scheduleEmailLoopAfterScrape();
+                    },
                   })
                 }
                 icon={<Play className="h-5 w-5" />}
