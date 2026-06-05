@@ -279,13 +279,18 @@ interface GrokContactResult {
   reason?: string | null;
 }
 
-const GROK_SYSTEM_PROMPT = `You help a recruiting agency find a working contact email for a company. Use your web search.
+const GROK_SYSTEM_PROMPT = `You help a recruiting agency find a working contact email for a company. Search the web like you would Google.
 
-- Find ANY plausible public email — careers, hiring, hr, support, sales, contact, hello, info, partnerships, or a personal address listed on the company's site. Anything that actually reaches the company is fine.
-- Don't be picky about role-based vs personal addresses; just return what you find.
-- Only avoid obvious automation noise (noreply@, postmaster@, abuse@, sentry.io, wixpress.com).
-- If you genuinely can't find one after a couple of searches, return email: null. Don't invent.
-- Return ONLY JSON: { "email": "<one email or null>", "alternates": [<other emails you saw>] }. No prose, no markdown.`;
+Steps:
+1. Search "<company> contact email" and "<company> careers email".
+2. Open the company's own website (/contact, /about, /careers, footer) when it shows up.
+3. Return ANY public email tied to the company — careers, hiring, hr, support, sales, contact, hello, info, partnerships, or a personal address shown on the site.
+
+Rules:
+- Be GENEROUS. Anything that reaches the company is fine.
+- Only skip obvious automation noise (noreply@, postmaster@, abuse@).
+- Even if you can't extract an email from a snippet, cite the company's website URL — the caller fetches it and grabs the email there.
+- Return ONLY JSON: { "email": "<one email or null>", "alternates": [<other emails>] }. No prose, no markdown.`;
 
 /**
  * Use Grok's built-in web search to find the right outreach email for a
@@ -344,6 +349,18 @@ export async function discoverViaGrok(
     if (found) ordered.push(...found);
   }
 
+  // Bing snippets often hide the email even when the linked page shows
+  // it. Fetch each citation and grep the HTML for emails — this is the
+  // same trick the batch path uses and accounts for most of the lift.
+  if (ordered.length === 0 && result.citations.length > 0) {
+    const single = new Map<string, { company: string }>([
+      [company.toLowerCase(), { company }],
+    ]);
+    const harvested = await crawlGrokCitations(result.citations, single);
+    const list = harvested.get(company.toLowerCase()) ?? [];
+    ordered.push(...list);
+  }
+
   const collected: DiscoveredContact[] = [];
   const seen = new Set<string>();
   for (let i = 0; i < ordered.length; i++) {
@@ -374,14 +391,19 @@ interface GrokBatchResult {
   results: GrokBatchEntry[];
 }
 
-const GROK_BATCH_SYSTEM_PROMPT = `You help a recruiting agency find a working contact email for each company in a short list.
+const GROK_BATCH_SYSTEM_PROMPT = `You help a recruiting agency find a working contact email for each company in a short list. Search the web like you would Google.
 
-- Use your web search to find ANY plausible public email for the company — careers, hiring, recruiting, hr, support, sales, contact, hello, info, press, partnerships, or even a personal address listed on the company's site. Anything that reaches the company is fine.
-- Don't be picky. If you can see an email associated with the company on a credible-looking page, return it.
-- Only avoid obvious noise: noreply@, postmaster@, abuse@, automated CRM/tracker domains like sentry.io or wixpress.com.
-- If you truly cannot find any email after a couple of searches, return email: null for that entry — don't invent one.
-- Echo the company name back exactly as it was given so we can match results.
-- Return ONLY a JSON object of the shape { "results": [{ "company", "email", "alternates" }] }. No prose, no markdown.`;
+For each company:
+1. Search "<company name> contact email" and "<company name> careers email".
+2. Open the company's own website (especially /contact, /about, /careers, /press, footer) when it appears in results.
+3. Return ANY plausible public email — careers, hiring, hr, support, sales, contact, hello, info, partnerships, or even a personal address shown on the company's site.
+
+Rules:
+- Be GENEROUS. If you see an email associated with the company, return it. Don't second-guess.
+- Only skip obvious automation: noreply@, postmaster@, abuse@.
+- If your snippets don't show an email but the company has a website, still cite that website in your citations — the caller fetches and parses the cited pages too.
+- Echo the company name exactly as given.
+- Return ONLY JSON: { "results": [{ "company", "email", "alternates" }] }. No prose, no markdown.`;
 
 /**
  * Bulk Grok lookup: ask Grok to find the right outreach email for up to ~5
@@ -492,12 +514,100 @@ export async function discoverViaGrokBatch(
     }
   }
 
+  // ── Citation crawl ───────────────────────────────────────────────
+  // The single biggest reason Grok returns no email even when one is
+  // visible on Google: Bing's snippet doesn't include the email but the
+  // actual cited page does. We have the URLs Grok visited — fetch them
+  // directly and grep for the company's domain emails.
+  if (matched.size < byCompany.size && res.citations.length > 0) {
+    const citationEmails = await crawlGrokCitations(res.citations, byCompany);
+    for (const [inputKey, emails] of Array.from(citationEmails.entries())) {
+      if (matched.has(inputKey)) continue;
+      const contacts = scoreGrokEmails(emails);
+      if (contacts.length === 0) continue;
+      const inputCompany = byCompany.get(inputKey)!.company;
+      out.set(inputCompany, contacts);
+      matched.add(inputKey);
+    }
+  }
+
   await logEvent("info", "Grok batch parsed", {
     requested: deduped.length,
     matched: matched.size,
     hadStructuredPayload: !!payload?.results?.length,
+    citations: res.citations.length,
   });
 
+  return out;
+}
+
+/**
+ * Fetch each URL Grok cited and extract emails from the HTML. Maps each
+ * email to the company whose lowercase name appears in the page text or
+ * the URL itself (fuzzy substring match). This is the main reason the
+ * loop now picks up addresses Google shows but Bing snippets hide.
+ */
+async function crawlGrokCitations(
+  citations: string[],
+  byCompany: Map<string, { company: string }>
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const limited = citations.slice(0, 8); // cap fetches per call
+  const fetched = await Promise.allSettled(
+    limited.map(async (url) => {
+      // Skip blocked / hostile domains (linkedin, indeed, etc.) and
+      // anything we can't parse as a URL.
+      try {
+        assertAllowedUrl(url);
+      } catch {
+        return null;
+      }
+      try {
+        const html = await defaultFetch(url);
+        return { url, html };
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  for (const r of fetched) {
+    if (r.status !== "fulfilled" || !r.value) continue;
+    const { url, html } = r.value;
+    const emails = extractEmailsFromText(html);
+    if (emails.length === 0) continue;
+
+    const lowerHtml = html.toLowerCase();
+    const lowerUrl = url.toLowerCase();
+    const keys = Array.from(byCompany.keys());
+
+    for (const email of emails) {
+      const local = email.split("@")[0]?.toLowerCase() ?? "";
+      const domain = email.split("@")[1]?.toLowerCase() ?? "";
+      // Pick the company most likely to own this email by inspecting:
+      //   1. email local-part / domain
+      //   2. the URL we fetched
+      //   3. the rendered HTML text
+      let assigned: string | null = null;
+      for (const key of keys) {
+        const compact = key.replace(/[^a-z0-9]/g, "");
+        if (!compact) continue;
+        if (
+          local.includes(compact) ||
+          domain.includes(compact) ||
+          lowerUrl.includes(compact) ||
+          lowerHtml.includes(key)
+        ) {
+          assigned = key;
+          break;
+        }
+      }
+      if (!assigned) continue;
+      const list = out.get(assigned) ?? [];
+      if (!list.includes(email)) list.push(email);
+      out.set(assigned, list);
+    }
+  }
   return out;
 }
 

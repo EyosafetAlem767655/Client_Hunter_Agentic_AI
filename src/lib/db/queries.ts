@@ -475,19 +475,19 @@ export async function getDashboardStats(timeWindow = "7d") {
     .from(jobPostings)
     .where(postingWhere);
 
+  // "Relevant" and "Contacts" are pipeline queues, not time series — the
+  // 1-by-1 email loop and the outreach pipeline both process every row
+  // ever marked relevant, regardless of when it was filtered. So we
+  // always show the total here; otherwise the dashboard reads "0 relevant"
+  // while the loop is happily processing jobs from a previous day.
   const [relevant] = await db
     .select({ total: count() })
     .from(filteredJobs)
-    .where(
-      since
-        ? and(eq(filteredJobs.isRelevant, true), gte(filteredJobs.filteredAt, since))
-        : eq(filteredJobs.isRelevant, true)
-    );
+    .where(eq(filteredJobs.isRelevant, true));
 
   const [withContacts] = await db
     .select({ total: count() })
-    .from(contacts)
-    .where(since ? gte(contacts.discoveredAt, since) : undefined);
+    .from(contacts);
 
   const [drafted] = await db
     .select({ total: count() })
@@ -575,7 +575,8 @@ export async function listJobsPaginated(params: {
   }
 
   if (params.status === "with-contact") {
-    const where = since ? gte(contacts.discoveredAt, since) : undefined;
+    // No time window — these are pipeline rows, not events.
+    const where = undefined;
     const items = await db
       .select({
         posting: jobPostings,
@@ -623,7 +624,9 @@ export async function listJobsPaginated(params: {
   } else if (params.status === "irrelevant") {
     conditions.push(eq(filteredJobs.isRelevant, false));
   }
-  if (since) {
+  // Don't time-window when the user explicitly asked for a pipeline status
+  // — they want to see the queue, not "what was added in the last 24 h".
+  if (since && params.status !== "relevant" && params.status !== "irrelevant") {
     conditions.push(gte(filteredJobs.filteredAt, since));
   }
 

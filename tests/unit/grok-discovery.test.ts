@@ -268,6 +268,56 @@ describe("discoverViaGrokBatch", () => {
     expect(out.get("Acme")?.[0].email).toBe("contact@acme.com");
   });
 
+  it("fetches Grok citations and grabs the email from the actual page when the snippet hid it", async () => {
+    let xaiCalls = 0;
+    const citation = "https://acme.example/contact";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string) => {
+        if (String(url).includes("api.x.ai")) {
+          xaiCalls++;
+          // Grok returns email: null but cites the contact page.
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({
+                      results: [
+                        {
+                          company: "Acme",
+                          email: null,
+                          alternates: [],
+                        },
+                      ],
+                    }),
+                  },
+                },
+              ],
+              citations: [citation],
+            }),
+            text: async () => "",
+          };
+        }
+        if (String(url) === citation) {
+          return {
+            ok: true,
+            status: 200,
+            text: async () =>
+              "<html><body>Reach Acme at <a href='mailto:careers@acme.example'>careers@acme.example</a></body></html>",
+          };
+        }
+        return { ok: false, status: 404, text: async () => "" };
+      })
+    );
+    const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
+    const out = await discoverViaGrokBatch([{ company: "Acme" }]);
+    expect(xaiCalls).toBe(1);
+    expect(out.get("Acme")?.[0].email).toBe("careers@acme.example");
+  });
+
   it("harvests emails from prose when Grok ignores the JSON instruction", async () => {
     const prose =
       "Couldn't structure this perfectly but here's what I found: " +
