@@ -15,17 +15,19 @@ describe("contact discovery", () => {
     expect(contacts[0].sourceType).toBe("listed");
   });
 
-  it("scrapes company site paths", async () => {
+  it("scrapes company site paths and ranks role-based emails higher", async () => {
     const { discoverFromCompanySite } = await import(
       "@/lib/contact/discovery"
     );
-    const html = "<p>Contact careers@example.com today</p>";
+    const html = "<p>Contact careers@acmestartup.io today</p>";
     const contacts = await discoverFromCompanySite(
-      "https://example.com",
+      "https://acmestartup.io",
       async () => html
     );
-    expect(contacts[0].confidence).toBe(0.6);
-    expect(contacts[0].email).toBe("careers@example.com");
+    expect(contacts.length).toBeGreaterThan(0);
+    expect(contacts[0].email).toBe("careers@acmestartup.io");
+    expect(contacts[0].confidence).toBeGreaterThan(0.7);
+    expect(contacts[0].sourceType).toBe("scraped_from_site");
   });
 
   it("pattern guess disabled by default", () => {

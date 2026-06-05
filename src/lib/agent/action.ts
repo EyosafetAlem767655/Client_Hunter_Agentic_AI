@@ -1,4 +1,4 @@
-import { env, CRON_EMAIL_LIMIT } from "@/lib/env";
+import { env, CRON_EMAIL_LIMIT, CONTACT_DISCOVERY_CONCURRENCY } from "@/lib/env";
 import { discoverContactsForPosting, pickBestContact } from "@/lib/contact/discovery";
 import { finalizeEmailBody } from "@/lib/email/templates";
 import { sendEmail } from "@/lib/email/transport";
@@ -12,32 +12,44 @@ import { sha256Hex } from "@/lib/hash";
 import { runAllGuardrails } from "./guardrails";
 import { memory } from "./memory";
 import { logEvent } from "./observability";
+import { withConcurrency } from "./reasoning";
 
 export async function discoverContactsForTopJobs(
   limit: number
 ): Promise<number> {
   const jobs = await memory.listTopRelevantWithoutContacts(limit);
-  let discovered = 0;
 
-  for (const { posting } of jobs) {
-    const contacts = await discoverContactsForPosting({
-      description: posting.description,
-      url: posting.url,
-      company: posting.company,
-    });
-    const best = pickBestContact(contacts);
-    if (!best) continue;
+  const results = await withConcurrency(
+    jobs,
+    CONTACT_DISCOVERY_CONCURRENCY,
+    async ({ posting }) => {
+      try {
+        const contacts = await discoverContactsForPosting({
+          description: posting.description,
+          url: posting.url,
+          company: posting.company,
+        });
+        const best = pickBestContact(contacts);
+        if (!best) return false;
+        await memory.upsertContact({
+          postingId: posting.id,
+          email: best.email,
+          sourceType: best.sourceType,
+          confidence: best.confidence.toFixed(2),
+        });
+        return true;
+      } catch (error) {
+        await logEvent("warn", "Contact discovery failed for posting", {
+          postingId: posting.id,
+          company: posting.company,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      }
+    }
+  );
 
-    await memory.upsertContact({
-      postingId: posting.id,
-      email: best.email,
-      sourceType: best.sourceType,
-      confidence: best.confidence.toFixed(2),
-    });
-    discovered++;
-  }
-
-  return discovered;
+  return results.filter(Boolean).length;
 }
 
 export async function draftEmailsForContacts(
