@@ -14,8 +14,10 @@ import {
   Loader2,
   Mail,
   Play,
+  Search,
   Send,
   Sparkles,
+  Square,
   Trash2,
   Wand2,
 } from "lucide-react";
@@ -46,10 +48,53 @@ export function SettingsClient({
   const [loading, setLoading] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState<RunResult | null>(null);
 
+  // 1-by-1 contact-discovery loop state.
+  const [discoveryProgress, setDiscoveryProgress] = useState<{
+    totalRelevant: number;
+    withContacts: number;
+    pending: number;
+    nextCompany: string | null;
+  } | null>(null);
+  const [discoveryActive, setDiscoveryActive] = useState(false);
+  const [discoveryLog, setDiscoveryLog] = useState<
+    Array<{ company: string; email: string | null; method: string | null }>
+  >([]);
+  // Use a ref so the loop can be cancelled mid-flight.
+  const stopDiscoveryRef = useState<{ current: boolean }>({ current: false })[0];
+
   useEffect(() => {
     const saved = sessionStorage.getItem(TOKEN_KEY);
     if (saved) setToken(saved);
   }, []);
+
+  // Pull initial discovery progress so the bar shows even before kickoff.
+  useEffect(() => {
+    if (!token.trim()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/manual/discover/status", {
+          headers: { Authorization: `Bearer ${token.trim()}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (data?.ok) {
+          setDiscoveryProgress({
+            totalRelevant: data.totalRelevant ?? 0,
+            withContacts: data.withContacts ?? 0,
+            pending: data.pending ?? 0,
+            nextCompany: data.nextCompany ?? null,
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   function saveToken(value: string) {
     setToken(value);
@@ -176,6 +221,98 @@ export function SettingsClient({
     }
   }
 
+  /**
+   * Drives the 1-by-1 discovery loop. Each iteration:
+   *   1. POSTs /api/manual/discover/next?n=1
+   *   2. updates the progress bar + recent-finds log
+   *   3. rests ~1.2 s so Grok has breathing room
+   * Stops when progress.pending hits 0, when the stop button is pressed,
+   * or after too many consecutive failures.
+   */
+  async function startDiscoveryLoop() {
+    if (!token.trim()) {
+      showToast(
+        "err",
+        "Unauthorized — paste your ADMIN_TOKEN before starting discovery."
+      );
+      return;
+    }
+    if (discoveryActive) return;
+    stopDiscoveryRef.current = false;
+    setDiscoveryActive(true);
+    setDiscoveryLog([]);
+
+    let consecutiveErrors = 0;
+    try {
+      while (!stopDiscoveryRef.current) {
+        let stepResult: {
+          ok?: boolean;
+          step?: {
+            attempted: number;
+            found: number;
+            results: Array<{
+              company: string;
+              email: string | null;
+              method: string | null;
+            }>;
+          };
+          progress?: {
+            totalRelevant: number;
+            withContacts: number;
+            pending: number;
+            nextCompany: string | null;
+          };
+          done?: boolean;
+          error?: string;
+        };
+        try {
+          const res = await fetch("/api/manual/discover/next?n=1", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token.trim()}` },
+          });
+          stepResult = await res.json();
+          if (!res.ok || stepResult.ok === false) {
+            throw new Error(stepResult.error ?? `HTTP ${res.status}`);
+          }
+        } catch (e) {
+          consecutiveErrors++;
+          showToast(
+            "err",
+            `Discovery step failed (${consecutiveErrors}/3): ${
+              e instanceof Error ? e.message : String(e)
+            }`
+          );
+          if (consecutiveErrors >= 3) break;
+          // Brief back-off, then retry.
+          await new Promise((r) => setTimeout(r, 2_500));
+          continue;
+        }
+        consecutiveErrors = 0;
+
+        if (stepResult.progress) setDiscoveryProgress(stepResult.progress);
+        if (stepResult.step?.results?.length) {
+          setDiscoveryLog((prev) =>
+            [...stepResult.step!.results, ...prev].slice(0, 30)
+          );
+        }
+        if (stepResult.done || (stepResult.progress?.pending ?? 0) === 0) {
+          showToast("ok", "All companies processed");
+          break;
+        }
+        // Let Grok rest between calls so we don't hammer xAI.
+        await new Promise((r) => setTimeout(r, 1_200));
+      }
+    } finally {
+      setDiscoveryActive(false);
+      stopDiscoveryRef.current = false;
+    }
+  }
+
+  function stopDiscoveryLoop() {
+    stopDiscoveryRef.current = true;
+    showToast("ok", "Stopping after the current company…");
+  }
+
   return (
     <div className="space-y-6">
       {toast && (
@@ -256,6 +393,117 @@ export function SettingsClient({
           </div>
         </div>
       )}
+
+      {/* Contact discovery 1-by-1 */}
+      <Card className="glass-card border-primary/20">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 gap-2">
+          <div className="flex items-center gap-2">
+            <Search className="h-5 w-5 text-primary" />
+            <CardTitle>Email discovery</CardTitle>
+          </div>
+          <div className="flex items-center gap-2">
+            {discoveryActive ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={stopDiscoveryLoop}
+                className="border-red-500/50 text-red-200 hover:bg-red-500/10"
+              >
+                <Square className="h-4 w-4" />
+                Stop
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={startDiscoveryLoop}
+                disabled={
+                  !token.trim() ||
+                  (discoveryProgress?.pending ?? 0) === 0 ||
+                  loading !== null
+                }
+              >
+                <Search className="h-4 w-4" />
+                Find emails one-by-one
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Walks through every relevant job that still needs a contact and
+            asks Grok (model{" "}
+            <code className="rounded bg-muted px-1 font-mono">grok-4-fast-reasoning</code>
+            ) for the company&apos;s email — one at a time, with a short rest
+            between calls. Each request finishes in well under 60 s so it never
+            trips the Vercel Hobby timeout.
+          </p>
+          {(() => {
+            const total = discoveryProgress?.totalRelevant ?? 0;
+            const done = discoveryProgress?.withContacts ?? 0;
+            const pending = discoveryProgress?.pending ?? 0;
+            const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+            return (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>
+                    {done.toLocaleString()} / {total.toLocaleString()} relevant
+                    jobs have contacts · {pending.toLocaleString()} pending
+                  </span>
+                  <span className="font-mono">{pct}%</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-background/60 ring-1 ring-border/40">
+                  <div
+                    className={`h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-[width] duration-500 ${
+                      discoveryActive
+                        ? "shadow-[0_0_10px_rgba(168,85,247,0.5)]"
+                        : ""
+                    }`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                {discoveryActive && discoveryProgress?.nextCompany && (
+                  <div className="text-xs text-foreground/70">
+                    Looking up{" "}
+                    <span className="font-medium text-foreground">
+                      {discoveryProgress.nextCompany}
+                    </span>
+                    …
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          {discoveryLog.length > 0 && (
+            <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border/30 bg-background/40 p-3 text-xs">
+              <div className="mb-1 text-muted-foreground">Recent finds:</div>
+              {discoveryLog.map((row, i) => (
+                <div
+                  key={`${row.company}-${i}`}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <span className="truncate">
+                    <span className="font-medium">{row.company}</span>
+                    {row.method && (
+                      <span className="ml-2 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-violet-300">
+                        {row.method}
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className={
+                      row.email
+                        ? "rounded bg-emerald-500/15 px-2 py-0.5 text-emerald-300"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {row.email ?? "no match"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Manual actions */}

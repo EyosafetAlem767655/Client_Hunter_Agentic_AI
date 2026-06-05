@@ -29,6 +29,176 @@ import { withConcurrency } from "./reasoning";
 export const GROK_LOOKUP_BATCH_SIZE = 3;
 
 /**
+ * Process the next N pending jobs through the contact-discovery chain
+ * (body → batched Grok → DDG → on-site → pattern). The "1-by-1" UI loop
+ * calls this with limit=1 (or 2) so each HTTP request finishes in well
+ * under the Vercel Hobby 60 s budget, then waits a short "rest" before
+ * the next request. Returns enough detail for the progress bar.
+ */
+export async function discoverNextContacts(limit: number): Promise<{
+  attempted: number;
+  found: number;
+  results: Array<{
+    postingId: number;
+    company: string;
+    title: string;
+    email: string | null;
+    method: "body" | "grok" | "fallback" | null;
+  }>;
+}> {
+  const slot = Math.max(1, Math.min(5, limit | 0));
+  const jobs = await memory.listTopRelevantWithoutContacts(slot);
+  const results: Array<{
+    postingId: number;
+    company: string;
+    title: string;
+    email: string | null;
+    method: "body" | "grok" | "fallback" | null;
+  }> = [];
+  if (jobs.length === 0) return { attempted: 0, found: 0, results };
+
+  let found = 0;
+
+  // Try posting body emails first (no network).
+  const stillMissing: typeof jobs = [];
+  for (const row of jobs) {
+    const fromBody = discoverFromBody(row.posting.description);
+    const best = pickBestContact(fromBody);
+    if (best) {
+      try {
+        await memory.upsertContact({
+          postingId: row.posting.id,
+          email: best.email,
+          sourceType: best.sourceType,
+          confidence: best.confidence.toFixed(2),
+        });
+        found++;
+        results.push({
+          postingId: row.posting.id,
+          company: row.posting.company,
+          title: row.posting.title,
+          email: best.email,
+          method: "body",
+        });
+      } catch {
+        stillMissing.push(row);
+      }
+    } else {
+      stillMissing.push(row);
+    }
+  }
+
+  // Grok the rest in ONE small batch (≤ slot size, so ≤ 5 by construction).
+  if (stillMissing.length > 0 && isGrokConfigured()) {
+    const inputs = stillMissing.map(({ posting }) => ({
+      company: posting.company,
+      jobTitle: posting.title,
+      jobUrl: posting.url,
+    }));
+    let map: Awaited<ReturnType<typeof discoverViaGrokBatch>> = new Map();
+    try {
+      map = await discoverViaGrokBatch(inputs);
+    } catch (e) {
+      await logEvent("warn", "discoverNext: Grok lookup failed", {
+        size: inputs.length,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+
+    const grokMissed: typeof stillMissing = [];
+    for (const row of stillMissing) {
+      const contacts = map.get(row.posting.company) ?? [];
+      const best = pickBestContact(contacts);
+      if (best) {
+        try {
+          await memory.upsertContact({
+            postingId: row.posting.id,
+            email: best.email,
+            sourceType: best.sourceType,
+            confidence: best.confidence.toFixed(2),
+          });
+          found++;
+          results.push({
+            postingId: row.posting.id,
+            company: row.posting.company,
+            title: row.posting.title,
+            email: best.email,
+            method: "grok",
+          });
+        } catch {
+          grokMissed.push(row);
+        }
+      } else {
+        grokMissed.push(row);
+      }
+    }
+
+    // Fallback chain for anything Grok still couldn't resolve.
+    for (const row of grokMissed) {
+      try {
+        const contacts = await discoverContactsForPosting(
+          {
+            description: row.posting.description,
+            url: row.posting.url,
+            company: row.posting.company,
+          },
+          { skipGrok: true }
+        );
+        const best = pickBestContact(contacts);
+        if (best) {
+          await memory.upsertContact({
+            postingId: row.posting.id,
+            email: best.email,
+            sourceType: best.sourceType,
+            confidence: best.confidence.toFixed(2),
+          });
+          found++;
+          results.push({
+            postingId: row.posting.id,
+            company: row.posting.company,
+            title: row.posting.title,
+            email: best.email,
+            method: "fallback",
+          });
+        } else {
+          results.push({
+            postingId: row.posting.id,
+            company: row.posting.company,
+            title: row.posting.title,
+            email: null,
+            method: null,
+          });
+        }
+      } catch (e) {
+        await logEvent("warn", "discoverNext: fallback failed", {
+          postingId: row.posting.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+        results.push({
+          postingId: row.posting.id,
+          company: row.posting.company,
+          title: row.posting.title,
+          email: null,
+          method: null,
+        });
+      }
+    }
+  } else {
+    for (const row of stillMissing) {
+      results.push({
+        postingId: row.posting.id,
+        company: row.posting.company,
+        title: row.posting.title,
+        email: null,
+        method: null,
+      });
+    }
+  }
+
+  return { attempted: jobs.length, found, results };
+}
+
+/**
  * Two-phase discovery so we hit Grok in groups of 5:
  *   1. Cheap pass — pull any email already in the posting body.
  *   2. For remaining jobs, ask Grok in batches of 5 (concurrent).

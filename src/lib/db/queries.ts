@@ -124,6 +124,47 @@ export async function listTopRelevantWithoutContacts(limit: number) {
   return relevant;
 }
 
+/**
+ * Snapshot of where the "1-by-1" Grok discovery loop is. Used by the UI
+ * progress bar and by the next-step endpoint to know when to stop.
+ */
+export async function getDiscoveryProgress(): Promise<{
+  totalRelevant: number;
+  withContacts: number;
+  pending: number;
+  nextCompany: string | null;
+}> {
+  const db = getDb();
+  const [totalRow] = await db
+    .select({ total: count() })
+    .from(filteredJobs)
+    .where(eq(filteredJobs.isRelevant, true));
+
+  const withContactsRows = await db
+    .selectDistinct({ postingId: contacts.postingId })
+    .from(contacts);
+  const withContacts = withContactsRows.length;
+
+  const totalRelevant = totalRow?.total ?? 0;
+  const pending = Math.max(0, totalRelevant - withContacts);
+
+  const [nextRow] = await db
+    .select({ company: jobPostings.company })
+    .from(filteredJobs)
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
+    .leftJoin(contacts, eq(contacts.postingId, jobPostings.id))
+    .where(and(eq(filteredJobs.isRelevant, true), isNull(contacts.id)))
+    .orderBy(desc(filteredJobs.score))
+    .limit(1);
+
+  return {
+    totalRelevant,
+    withContacts,
+    pending,
+    nextCompany: nextRow?.company ?? null,
+  };
+}
+
 export async function upsertContact(data: {
   postingId: number;
   email: string;
