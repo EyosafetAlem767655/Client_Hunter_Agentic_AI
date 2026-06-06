@@ -2,6 +2,7 @@ import Link from "next/link";
 import { OutreachClient } from "@/components/outreach/outreach-client";
 import type { OutreachRow } from "@/components/outreach/email-detail-drawer";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
+import { GrokChat } from "@/components/outreach/grok-chat";
 import { listOutreachPaginated } from "@/lib/db/queries";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +62,7 @@ export default async function OutreachPage({
             {Object.values(byStatus).reduce((a, b) => a + b.length, 0)} emails
           </p>
         </div>
-        <div className="inline-flex rounded-xl border border-white/10 bg-white/5 p-1 backdrop-blur">
+        <div className="inline-flex rounded-xl border border-amber-900/15 bg-white/50 p-1 backdrop-blur">
           {WINDOWS.map((w) => (
             <Link
               key={w.value}
@@ -71,7 +72,7 @@ export default async function OutreachPage({
               }}
               className={`rounded-lg px-3 py-1.5 text-sm transition ${
                 activeWindow === w.value
-                  ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow"
+                  ? "bg-gradient-to-r from-amber-700 to-orange-600 text-white shadow"
                   : "text-foreground/70 hover:text-foreground"
               }`}
             >
@@ -83,6 +84,8 @@ export default async function OutreachPage({
 
       {error && <DbErrorBanner message={error} />}
       {!error && <OutreachClient byStatus={byStatus} initialTab={initialTab} />}
+
+      <GrokChat />
     </div>
   );
 }

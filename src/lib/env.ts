@@ -97,6 +97,7 @@ const envSchema = z.object({
     .default("development"),
   GROK_API_KEY: z.string().min(1).optional(),
   GROK_MODEL: z.string().default("grok-4-fast-reasoning"),
+  LANGSEARCH_API_KEY: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

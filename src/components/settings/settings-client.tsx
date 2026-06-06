@@ -375,7 +375,7 @@ export function SettingsClient({
         <div
           className={`fixed right-6 top-20 z-50 flex max-w-md items-center gap-2 rounded-lg border px-4 py-3 shadow-2xl backdrop-blur-md ${
             toast.kind === "ok"
-              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+              ? "border-amber-700/40 bg-amber-100/60 text-amber-900"
               : "border-red-500/40 bg-red-500/10 text-red-200"
           }`}
         >
@@ -426,7 +426,7 @@ export function SettingsClient({
           </div>
           <div
             className={`flex h-2 w-2 shrink-0 rounded-full ${
-              token.trim() ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "bg-muted"
+              token.trim() ? "bg-amber-600 shadow-[0_0_8px_rgba(180,83,9,0.55)]" : "bg-muted"
             }`}
             aria-hidden
           />
@@ -452,14 +452,14 @@ export function SettingsClient({
 
       {/* Post-scrape countdown */}
       {scrapeCountdown !== null && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-5 py-4">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-700/40 bg-amber-100/70 px-5 py-4">
           <div className="flex items-center gap-3">
-            <Loader2 className="h-5 w-5 animate-spin text-emerald-300" />
+            <Loader2 className="h-5 w-5 animate-spin text-amber-800" />
             <div>
-              <div className="text-sm font-medium text-emerald-100">
+              <div className="text-sm font-medium text-amber-900">
                 Auto-starting email discovery in {scrapeCountdown}s
               </div>
-              <div className="text-xs text-emerald-200/80">
+              <div className="text-xs text-amber-800/80">
                 Lets the LLM filter commits settle before Grok looks up the
                 relevant companies, one at a time.
               </div>
@@ -469,7 +469,7 @@ export function SettingsClient({
             size="sm"
             variant="outline"
             onClick={cancelCountdown}
-            className="border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/10"
+            className="border-amber-700/40 text-amber-900 hover:bg-amber-100"
           >
             Cancel
           </Button>
@@ -542,9 +542,9 @@ export function SettingsClient({
                 </div>
                 <div className="h-2 w-full overflow-hidden rounded-full bg-background/60 ring-1 ring-border/40">
                   <div
-                    className={`h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-[width] duration-500 ${
+                    className={`h-full rounded-full bg-gradient-to-r from-amber-700 to-orange-500 transition-[width] duration-500 ${
                       discoveryActive
-                        ? "shadow-[0_0_12px_rgba(16,185,129,0.55)]"
+                        ? "shadow-[0_0_12px_rgba(180,83,9,0.55)]"
                         : ""
                     }`}
                     style={{ width: `${pct}%` }}
@@ -568,7 +568,7 @@ export function SettingsClient({
                 <span>Recent finds:</span>
                 <a
                   href="/jobs?status=with-contact&window=all"
-                  className="text-emerald-300 hover:text-emerald-200 underline-offset-2 hover:underline"
+                  className="text-amber-800 hover:text-amber-900 underline-offset-2 hover:underline"
                 >
                   View all contacts →
                 </a>
@@ -580,12 +580,12 @@ export function SettingsClient({
                 >
                   <a
                     href={`/jobs?status=with-contact&window=all`}
-                    className="truncate transition hover:text-emerald-200"
+                    className="truncate transition hover:text-amber-900"
                     title={`Open ${row.company} in the jobs list`}
                   >
                     <span className="font-medium">{row.company}</span>
                     {row.method && (
-                      <span className="ml-2 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300">
+                      <span className="ml-2 rounded bg-amber-700/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-amber-900">
                         {row.method}
                       </span>
                     )}
@@ -593,7 +593,7 @@ export function SettingsClient({
                   <span
                     className={
                       row.email
-                        ? "rounded bg-emerald-500/15 px-2 py-0.5 text-emerald-300"
+                        ? "rounded bg-amber-200 px-2 py-0.5 text-amber-900"
                         : "text-muted-foreground"
                     }
                   >
@@ -672,7 +672,7 @@ export function SettingsClient({
                   })
                 }
                 icon={<Play className="h-5 w-5" />}
-                gradient="from-emerald-500/30 to-cyan-500/20"
+                gradient="from-amber-300/50 to-orange-200/40"
                 primary
               />
               <ActionTile
@@ -682,7 +682,7 @@ export function SettingsClient({
                 loading={loading === "Outreach"}
                 onClick={() => runManual("/api/manual/outreach", "Outreach")}
                 icon={<Mail className="h-5 w-5" />}
-                gradient="from-cyan-500/30 to-teal-500/20"
+                gradient="from-yellow-200/60 to-amber-100/50"
               />
               <ActionTile
                 title="Send test email"
@@ -691,7 +691,7 @@ export function SettingsClient({
                 loading={loading === "Test email"}
                 onClick={() => runManual("/api/manual/test-email", "Test email")}
                 icon={<Send className="h-5 w-5" />}
-                gradient="from-teal-500/30 to-emerald-500/20"
+                gradient="from-orange-300/50 to-amber-200/40"
               />
               <ActionTile
                 title="Send digest now"
@@ -723,13 +723,13 @@ export function SettingsClient({
               <div
                 className={`rounded-lg border p-4 ${
                   lastRun.ok
-                    ? "border-emerald-500/30 bg-emerald-500/5"
+                    ? "border-amber-700/30 bg-amber-100/40"
                     : "border-red-500/30 bg-red-500/5"
                 }`}
               >
                 <div className="mb-2 flex items-center gap-2 text-sm font-medium">
                   {lastRun.ok ? (
-                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    <CheckCircle2 className="h-4 w-4 text-amber-700" />
                   ) : (
                     <AlertCircle className="h-4 w-4 text-red-400" />
                   )}

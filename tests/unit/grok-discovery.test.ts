@@ -218,9 +218,9 @@ describe("discoverViaGrokBatch", () => {
       { company: "acme" },
     ]);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    // Only one company line in the user prompt
+    // Only one "search the email…" line in the user prompt after dedupe.
     const userMsg = body.messages[1].content;
-    const lines = (userMsg.match(/\n\d+\. /g) ?? []).length;
+    const lines = (userMsg.match(/search the email for the company called/g) ?? []).length;
     expect(lines).toBe(1);
   });
 

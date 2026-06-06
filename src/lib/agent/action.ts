@@ -3,10 +3,15 @@ import {
   discoverContactsForPosting,
   discoverFromBody,
   discoverViaGrokBatch,
+  isUsefulEmail,
   pickBestContact,
 } from "@/lib/contact/discovery";
 import type { DiscoveredContact } from "@/types";
 import { isGrokConfigured } from "@/lib/llm/grok";
+import {
+  findCompanyEmails,
+  isLangSearchConfigured,
+} from "@/lib/langsearch/client";
 import { finalizeEmailBody } from "@/lib/email/templates";
 import { sendEmail } from "@/lib/email/transport";
 import { callOpenAIJson } from "@/lib/llm/client";
@@ -68,7 +73,7 @@ export async function discoverNextContacts(limit: number): Promise<{
     company: string;
     title: string;
     email: string | null;
-    method: "body" | "grok" | "fallback" | null;
+    method: "body" | "langsearch" | "grok" | "fallback" | null;
   }>;
 }> {
   const slot = Math.max(1, Math.min(5, limit | 0));
@@ -78,7 +83,7 @@ export async function discoverNextContacts(limit: number): Promise<{
     company: string;
     title: string;
     email: string | null;
-    method: "body" | "grok" | "fallback" | null;
+    method: "body" | "langsearch" | "grok" | "fallback" | null;
   }> = [];
   if (jobs.length === 0) return { attempted: 0, found: 0, results };
 
@@ -113,9 +118,49 @@ export async function discoverNextContacts(limit: number): Promise<{
     }
   }
 
+  // LangSearch pass — runs BEFORE Grok because it's the cheaper, faster
+  // lookup. We only fall through to Grok for companies LangSearch came up
+  // empty on, which usually halves the Grok cost.
+  const afterLangSearch: typeof stillMissing = [];
+  if (stillMissing.length > 0 && isLangSearchConfigured()) {
+    for (const row of stillMissing) {
+      try {
+        const emails = await findCompanyEmails(row.posting.company);
+        const usable = emails.filter(isUsefulEmail);
+        if (usable.length === 0) {
+          afterLangSearch.push(row);
+          continue;
+        }
+        const email = usable[0];
+        await memory.upsertContact({
+          postingId: row.posting.id,
+          email,
+          sourceType: "scraped_from_site",
+          confidence: "0.88",
+        });
+        found++;
+        results.push({
+          postingId: row.posting.id,
+          company: row.posting.company,
+          title: row.posting.title,
+          email,
+          method: "langsearch",
+        });
+      } catch (e) {
+        await logEvent("warn", "discoverNext: LangSearch failed", {
+          postingId: row.posting.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+        afterLangSearch.push(row);
+      }
+    }
+  } else {
+    afterLangSearch.push(...stillMissing);
+  }
+
   // Grok the rest in ONE small batch (≤ slot size, so ≤ 5 by construction).
-  if (stillMissing.length > 0 && isGrokConfigured()) {
-    const inputs = stillMissing.map(({ posting }) => ({
+  if (afterLangSearch.length > 0 && isGrokConfigured()) {
+    const inputs = afterLangSearch.map(({ posting }) => ({
       company: posting.company,
       jobTitle: posting.title,
       jobUrl: posting.url,
@@ -130,8 +175,8 @@ export async function discoverNextContacts(limit: number): Promise<{
       });
     }
 
-    const grokMissed: typeof stillMissing = [];
-    for (const row of stillMissing) {
+    const grokMissed: typeof afterLangSearch = [];
+    for (const row of afterLangSearch) {
       const contacts = map.get(row.posting.company) ?? [];
       const best = pickBestContact(contacts);
       if (best) {
@@ -211,9 +256,9 @@ export async function discoverNextContacts(limit: number): Promise<{
       }
     }
   } else {
-    for (const row of stillMissing) {
-      // No Grok available and no body email — mark as skipped so the
-      // pending queue advances on the next loop iteration.
+    for (const row of afterLangSearch) {
+      // No Grok available and no body / LangSearch hit — mark as skipped so
+      // the pending queue advances on the next loop iteration.
       await markPostingSkipped(row.posting.id);
       results.push({
         postingId: row.posting.id,

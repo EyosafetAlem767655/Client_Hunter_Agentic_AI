@@ -71,7 +71,7 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
                 </td>
                 <td className="p-4 text-xs">
                   {job.contactEmail ? (
-                    <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-emerald-300">
+                    <span className="rounded bg-amber-200 px-2 py-0.5 text-amber-900">
                       {job.contactEmail}
                     </span>
                   ) : (
@@ -85,9 +85,9 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
                         className={cn(
                           "h-full rounded-full",
                           (job.score ?? 0) >= 70
-                            ? "bg-emerald-500"
+                            ? "bg-amber-700"
                             : (job.score ?? 0) >= 40
-                              ? "bg-amber-500"
+                              ? "bg-orange-500"
                               : "bg-red-500"
                         )}
                         style={{ width: `${job.score ?? 0}%` }}

@@ -279,18 +279,7 @@ interface GrokContactResult {
   reason?: string | null;
 }
 
-const GROK_SYSTEM_PROMPT = `You help a recruiting agency find a working contact email for a company. Search the web like you would Google.
-
-Steps:
-1. Search "<company> contact email" and "<company> careers email".
-2. Open the company's own website (/contact, /about, /careers, footer) when it shows up.
-3. Return ANY public email tied to the company — careers, hiring, hr, support, sales, contact, hello, info, partnerships, or a personal address shown on the site.
-
-Rules:
-- Be GENEROUS. Anything that reaches the company is fine.
-- Only skip obvious automation noise (noreply@, postmaster@, abuse@).
-- Even if you can't extract an email from a snippet, cite the company's website URL — the caller fetches it and grabs the email there.
-- Return ONLY JSON: { "email": "<one email or null>", "alternates": [<other emails>] }. No prose, no markdown.`;
+const GROK_SYSTEM_PROMPT = `You are GROK`;
 
 /**
  * Use Grok's built-in web search to find the right outreach email for a
@@ -303,17 +292,8 @@ export async function discoverViaGrok(
   if (!isGrokConfigured()) return [];
   if (!company || company.trim().length < 2) return [];
 
-  const userPrompt = [
-    `Find ANY working contact email for the company below. A generic info@ or hello@ is fine.`,
-    ``,
-    `Company: ${company}`,
-    posting?.title ? `Job title (context): ${posting.title}` : null,
-    posting?.url ? `Job posting URL (context): ${posting.url}` : null,
-    ``,
-    `Return JSON only: { "email": "<one email or null>", "alternates": [<other emails>] }`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  void posting; // simplified prompt — context fields not used
+  const userPrompt = `search the email for the company called ${company}\n\nReturn JSON: { "email": "<one email or null>", "alternates": [<other emails>] }`;
 
   let result: Awaited<ReturnType<typeof callGrokJson<GrokContactResult>>>;
   try {
@@ -391,19 +371,7 @@ interface GrokBatchResult {
   results: GrokBatchEntry[];
 }
 
-const GROK_BATCH_SYSTEM_PROMPT = `You help a recruiting agency find a working contact email for each company in a short list. Search the web like you would Google.
-
-For each company:
-1. Search "<company name> contact email" and "<company name> careers email".
-2. Open the company's own website (especially /contact, /about, /careers, /press, footer) when it appears in results.
-3. Return ANY plausible public email — careers, hiring, hr, support, sales, contact, hello, info, partnerships, or even a personal address shown on the company's site.
-
-Rules:
-- Be GENEROUS. If you see an email associated with the company, return it. Don't second-guess.
-- Only skip obvious automation: noreply@, postmaster@, abuse@.
-- If your snippets don't show an email but the company has a website, still cite that website in your citations — the caller fetches and parses the cited pages too.
-- Echo the company name exactly as given.
-- Return ONLY JSON: { "results": [{ "company", "email", "alternates" }] }. No prose, no markdown.`;
+const GROK_BATCH_SYSTEM_PROMPT = `You are GROK`;
 
 /**
  * Bulk Grok lookup: ask Grok to find the right outreach email for up to ~5
@@ -428,16 +396,16 @@ export async function discoverViaGrokBatch(
   const deduped = Array.from(byCompany.values());
   if (deduped.length === 0) return out;
 
-  const lines = deduped.map(
-    (e, i) =>
-      `${i + 1}. ${e.company}` +
-      (e.jobTitle ? ` (role: ${e.jobTitle})` : "") +
-      (e.jobUrl ? ` (posting: ${e.jobUrl})` : "")
-  );
+  // Per the user's spec: ask Grok one line per company, no extra context.
+  // Return JSON so we can map answers back to the right input. Anything
+  // Grok produces in prose still gets picked up by the salvage / citation
+  // passes below.
+  const queries = deduped
+    .map((e) => `search the email for the company called ${e.company}`)
+    .join("\n");
   const userPrompt =
-    `Find ANY working contact email for each company below. Even a generic info@ or hello@ is fine. Return JSON only.\n\n` +
-    `Format: { "results": [{ "company": "<exactly as given>", "email": "<one email or null>", "alternates": [<other emails you saw>] }, ...] }\n\n` +
-    `Companies:\n${lines.join("\n")}\n`;
+    `${queries}\n\n` +
+    `Return JSON: { "results": [{ "company", "email", "alternates" }] }`;
 
   let res: Awaited<ReturnType<typeof callGrokJson<GrokBatchResult>>>;
   try {

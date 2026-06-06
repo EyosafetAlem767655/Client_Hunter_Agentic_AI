@@ -32,27 +32,27 @@ export default async function DashboardPage({
   return (
     <div className="space-y-10">
       {/* Hero */}
-      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-emerald-600/20 via-teal-500/10 to-amber-400/10 p-8 sm:p-10 backdrop-blur-xl">
+      <section className="relative overflow-hidden rounded-3xl border border-amber-900/15 bg-gradient-to-br from-amber-200/40 via-orange-100/40 to-amber-50/40 p-8 sm:p-10 backdrop-blur-xl">
         <div
-          className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full bg-emerald-500/30 blur-3xl"
+          className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full bg-amber-300/40 blur-3xl"
           aria-hidden
         />
         <div
-          className="pointer-events-none absolute -bottom-32 -right-16 h-80 w-80 rounded-full bg-amber-400/20 blur-3xl"
+          className="pointer-events-none absolute -bottom-32 -right-16 h-80 w-80 rounded-full bg-orange-300/30 blur-3xl"
           aria-hidden
         />
 
         <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="max-w-2xl">
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-foreground/80 backdrop-blur">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-amber-900/15 bg-white/40 px-3 py-1 text-xs font-medium text-amber-900 backdrop-blur">
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-600 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-600" />
               </span>
               Agentic pipeline · {dryRun ? "Dry run" : "Live"}
             </div>
             <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-              <span className="bg-gradient-to-r from-emerald-300 via-teal-200 to-cyan-300 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-amber-800 via-orange-700 to-amber-600 bg-clip-text text-transparent">
                 Talent
               </span>
               <span className="text-foreground">Bridge</span>
@@ -63,7 +63,7 @@ export default async function DashboardPage({
             <div className="mt-6 flex flex-wrap gap-3">
               <Link
                 href="/settings"
-                className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:from-emerald-400 hover:to-cyan-400"
+                className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-700 to-orange-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-amber-900/30 transition hover:from-amber-600 hover:to-orange-500"
               >
                 <Zap className="h-4 w-4" />
                 Run scrape now
@@ -71,7 +71,7 @@ export default async function DashboardPage({
               </Link>
               <Link
                 href="/jobs"
-                className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-medium text-foreground/90 backdrop-blur transition hover:border-white/30 hover:bg-white/10"
+                className="inline-flex items-center gap-2 rounded-xl border border-amber-900/15 bg-white/50 px-5 py-3 text-sm font-medium text-foreground/90 backdrop-blur transition hover:border-amber-900/30 hover:bg-white/70"
               >
                 Browse jobs
               </Link>
@@ -116,7 +116,7 @@ export default async function DashboardPage({
               Click any tile to drill into the underlying records.
             </p>
           </div>
-          <div className="inline-flex rounded-xl border border-white/10 bg-white/5 p-1 backdrop-blur">
+          <div className="inline-flex rounded-xl border border-amber-900/15 bg-white/50 p-1 backdrop-blur">
             {WINDOW_OPTIONS.map((opt) => (
               <Link
                 key={opt.value}
@@ -124,7 +124,7 @@ export default async function DashboardPage({
                 scroll={false}
                 className={`rounded-lg px-3 py-1.5 text-sm transition ${
                   timeWindow === opt.value
-                    ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow"
+                    ? "bg-gradient-to-r from-amber-700 to-orange-600 text-white shadow"
                     : "text-foreground/70 hover:text-foreground"
                 }`}
               >
@@ -163,7 +163,7 @@ function FeaturePill({
   text: string;
 }) {
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-foreground/85 backdrop-blur">
+    <div className="flex items-center gap-2 rounded-xl border border-amber-900/15 bg-white/50 px-4 py-2 text-sm text-foreground/85 backdrop-blur">
       <span className="text-primary">{icon}</span>
       {text}
     </div>

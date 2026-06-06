@@ -75,7 +75,7 @@ export default async function JobsPage({
             {activeWindow === "all" ? "all time" : `last ${activeWindow}`}
           </p>
         </div>
-        <div className="inline-flex rounded-xl border border-white/10 bg-white/5 p-1 backdrop-blur">
+        <div className="inline-flex rounded-xl border border-amber-900/15 bg-white/50 p-1 backdrop-blur">
           {WINDOWS.map((w) => (
             <Link
               key={w.value}
@@ -88,7 +88,7 @@ export default async function JobsPage({
               }}
               className={`rounded-lg px-3 py-1.5 text-sm transition ${
                 activeWindow === w.value
-                  ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow"
+                  ? "bg-gradient-to-r from-amber-700 to-orange-600 text-white shadow"
                   : "text-foreground/70 hover:text-foreground"
               }`}
             >
@@ -98,7 +98,7 @@ export default async function JobsPage({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-white/5 pb-2">
+      <div className="flex flex-wrap gap-2 border-b border-amber-900/15 pb-2">
         {TABS.map((tab) => (
           <Link
             key={tab.key}
@@ -111,7 +111,7 @@ export default async function JobsPage({
             }}
             className={`rounded-lg px-3 py-1.5 text-sm transition ${
               activeStatus === tab.key
-                ? "bg-white/10 text-foreground"
+                ? "bg-amber-200/60 text-foreground"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >

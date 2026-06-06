@@ -15,16 +15,16 @@ export function PipelineFunnel({
   stats: Record<string, number>;
 }) {
   const data = [
-    { name: "Scraped", value: stats.scraped ?? 0, fill: "#10b981" },
-    { name: "Relevant", value: stats.relevant ?? 0, fill: "#14b8a6" },
-    { name: "Contact", value: stats.contactsFound ?? 0, fill: "#06b6d4" },
-    { name: "Drafted", value: stats.drafted ?? 0, fill: "#38bdf8" },
-    { name: "Sent", value: stats.sent ?? 0, fill: "#fbbf24" },
-    { name: "Replied", value: stats.replied ?? 0, fill: "#fb7185" },
+    { name: "Scraped", value: stats.scraped ?? 0, fill: "#92400e" },
+    { name: "Relevant", value: stats.relevant ?? 0, fill: "#b45309" },
+    { name: "Contact", value: stats.contactsFound ?? 0, fill: "#d97706" },
+    { name: "Drafted", value: stats.drafted ?? 0, fill: "#ea580c" },
+    { name: "Sent", value: stats.sent ?? 0, fill: "#f59e0b" },
+    { name: "Replied", value: stats.replied ?? 0, fill: "#fbbf24" },
   ];
 
   return (
-    <Card className="glass-card border-white/10">
+    <Card className="glass-card border-amber-900/15">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Pipeline funnel</CardTitle>
         <span className="text-xs text-muted-foreground">last 7d</span>
@@ -34,16 +34,16 @@ export function PipelineFunnel({
           <FunnelChart>
             <Tooltip
               contentStyle={{
-                background: "rgba(15, 14, 28, 0.95)",
-                border: "1px solid rgba(255,255,255,0.1)",
+                background: "rgba(254, 247, 224, 0.97)",
+                border: "1px solid rgba(120, 53, 15, 0.2)",
                 borderRadius: 10,
-                color: "#f1f5f9",
+                color: "#3a2817",
               }}
             />
             <Funnel dataKey="value" data={data} isAnimationActive>
               <LabelList
                 position="right"
-                fill="#e2e8f0"
+                fill="#3a2817"
                 stroke="none"
                 dataKey="name"
                 fontSize={12}

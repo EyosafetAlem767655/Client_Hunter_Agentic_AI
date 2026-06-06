@@ -25,7 +25,7 @@ export function TrendChart({
   }));
 
   return (
-    <Card className="glass-card border-white/10">
+    <Card className="glass-card border-amber-900/15">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Emails sent</CardTitle>
         <span className="text-xs text-muted-foreground">last 30d</span>
@@ -35,26 +35,26 @@ export function TrendChart({
           <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
             <defs>
               <linearGradient id="emailGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#10b981" stopOpacity={0.55} />
-                <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
+                <stop offset="0%" stopColor="#b45309" stopOpacity={0.55} />
+                <stop offset="100%" stopColor="#fbbf24" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
-            <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(120, 53, 15, 0.08)" />
+            <XAxis dataKey="day" stroke="#6b5340" fontSize={11} tickLine={false} axisLine={false} />
+            <YAxis stroke="#6b5340" fontSize={11} tickLine={false} axisLine={false} />
             <Tooltip
               contentStyle={{
-                background: "rgba(15, 14, 28, 0.95)",
-                border: "1px solid rgba(255,255,255,0.1)",
+                background: "rgba(254, 247, 224, 0.97)",
+                border: "1px solid rgba(120, 53, 15, 0.2)",
                 borderRadius: 10,
-                color: "#f1f5f9",
+                color: "#3a2817",
               }}
-              labelStyle={{ color: "#e2e8f0" }}
+              labelStyle={{ color: "#3a2817" }}
             />
             <Area
               type="monotone"
               dataKey="emails"
-              stroke="#5eead4"
+              stroke="#b45309"
               strokeWidth={2}
               fill="url(#emailGrad)"
             />

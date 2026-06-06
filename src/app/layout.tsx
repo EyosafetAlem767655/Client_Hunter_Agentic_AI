@@ -28,7 +28,7 @@ export const metadata: Metadata = {
       "Daily VA job scraping + GPT scoring + outreach, on Vercel Hobby.",
     type: "website",
   },
-  themeColor: "#04140f",
+  themeColor: "#f7eedd",
 };
 
 const nav = [
@@ -44,16 +44,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <body className={`${dmSans.variable} ${jetbrains.variable} font-sans`}>
         <div className="mesh-bg" aria-hidden />
-        <header className="sticky top-0 z-40 border-b border-white/5 bg-background/40 backdrop-blur-xl">
+        <header className="sticky top-0 z-40 border-b border-amber-900/10 bg-background/70 backdrop-blur-xl">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
             <Link
               href="/"
               className="flex items-center gap-2 text-lg font-semibold tracking-tight"
             >
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 text-white shadow-lg shadow-emerald-500/40">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-amber-700 to-orange-600 text-white shadow-lg shadow-amber-900/30">
                 <svg
                   viewBox="0 0 24 24"
                   fill="none"
@@ -67,7 +67,7 @@ export default function RootLayout({
                 </svg>
               </span>
               Talent
-              <span className="bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-amber-700 to-orange-700 bg-clip-text text-transparent">
                 Bridge
               </span>
             </Link>
@@ -76,7 +76,7 @@ export default function RootLayout({
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="rounded-lg px-3 py-1.5 transition-colors hover:bg-white/5 hover:text-foreground"
+                  className="rounded-lg px-3 py-1.5 transition-colors hover:bg-amber-900/5 hover:text-foreground"
                 >
                   {item.label}
                 </Link>

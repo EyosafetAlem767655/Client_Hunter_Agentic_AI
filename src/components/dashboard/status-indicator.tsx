@@ -27,7 +27,7 @@ export function StatusIndicator({ lastRunAt }: { lastRunAt: string | null }) {
       variant="outline"
       className={cn(
         "gap-2 px-3 py-1",
-        status === "healthy" && "border-emerald-500/50 text-emerald-400",
+        status === "healthy" && "border-amber-700/50 text-amber-800",
         status === "warning" && "border-amber-500/50 text-amber-400",
         status === "critical" && "border-red-500/50 text-red-400"
       )}
@@ -35,7 +35,7 @@ export function StatusIndicator({ lastRunAt }: { lastRunAt: string | null }) {
       <span
         className={cn(
           "h-2 w-2 rounded-full",
-          status === "healthy" && "animate-pulse bg-emerald-400",
+          status === "healthy" && "animate-pulse bg-amber-600",
           status === "warning" && "bg-amber-400",
           status === "critical" && "bg-red-400"
         )}

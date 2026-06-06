@@ -35,48 +35,48 @@ const META: Record<
     label: "Scraped",
     hint: "VA postings ingested",
     icon: Inbox,
-    grad: "from-emerald-500/30 via-emerald-500/10 to-transparent",
-    ring: "ring-emerald-500/30",
+    grad: "from-amber-200/70 via-amber-100/40 to-transparent",
+    ring: "ring-amber-700/30",
     href: (w) => `/jobs?window=${w}`,
   },
   relevant: {
     label: "Relevant",
     hint: "Passed LLM filter",
     icon: Sparkles,
-    grad: "from-teal-500/30 via-teal-500/10 to-transparent",
-    ring: "ring-teal-500/30",
+    grad: "from-orange-200/70 via-orange-100/40 to-transparent",
+    ring: "ring-orange-700/30",
     href: (w) => `/jobs?status=relevant&window=${w}`,
   },
   contactsFound: {
     label: "Contacts",
     hint: "Discovered emails",
     icon: UserSearch,
-    grad: "from-cyan-500/30 via-cyan-500/10 to-transparent",
-    ring: "ring-cyan-500/30",
+    grad: "from-yellow-200/70 via-yellow-100/40 to-transparent",
+    ring: "ring-yellow-700/30",
     href: (w) => `/jobs?status=with-contact&window=${w}`,
   },
   drafted: {
     label: "Drafted",
     hint: "Outreach queued",
     icon: Mail,
-    grad: "from-sky-500/30 via-sky-500/10 to-transparent",
-    ring: "ring-sky-500/30",
+    grad: "from-stone-200/70 via-stone-100/40 to-transparent",
+    ring: "ring-stone-700/30",
     href: (w) => `/outreach?status=pending&window=${w}`,
   },
   sent: {
     label: "Sent",
     hint: "Delivered in window",
     icon: Send,
-    grad: "from-amber-400/30 via-amber-400/10 to-transparent",
-    ring: "ring-amber-400/30",
+    grad: "from-amber-300/70 via-amber-200/40 to-transparent",
+    ring: "ring-amber-800/30",
     href: (w) => `/outreach?status=sent&window=${w}`,
   },
   replied: {
     label: "Replied",
     hint: "Lead engaged",
     icon: CheckCircle2,
-    grad: "from-rose-400/30 via-rose-400/10 to-transparent",
-    ring: "ring-rose-400/30",
+    grad: "from-orange-300/70 via-orange-200/40 to-transparent",
+    ring: "ring-orange-800/30",
     href: () => `/outreach?status=replied`,
   },
 };
@@ -114,10 +114,10 @@ export function StatsCards({
             <Link
               href={meta.href(timeWindow)}
               aria-label={`Drill into ${meta.label}`}
-              className={`group relative block overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br ${meta.grad} p-5 backdrop-blur-xl transition hover:border-white/30 hover:-translate-y-0.5 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60`}
+              className={`group relative block overflow-hidden rounded-2xl border border-amber-900/15 bg-gradient-to-br ${meta.grad} p-5 backdrop-blur-xl transition hover:border-amber-900/30 hover:-translate-y-0.5 hover:shadow-2xl hover:shadow-amber-900/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60`}
             >
               <div
-                className={`pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-white/5 blur-2xl transition group-hover:scale-110`}
+                className={`pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-amber-200/40 blur-2xl transition group-hover:scale-110`}
                 aria-hidden
               />
               <div className="relative flex items-start justify-between">
@@ -131,7 +131,7 @@ export function StatsCards({
                   <p className="mt-1 text-xs text-foreground/60">{meta.hint}</p>
                 </div>
                 <div
-                  className={`flex h-9 w-9 items-center justify-center rounded-xl bg-background/40 ring-1 ${meta.ring}`}
+                  className={`flex h-9 w-9 items-center justify-center rounded-xl bg-white/70 ring-1 ${meta.ring}`}
                 >
                   <Icon className="h-4 w-4 text-foreground/80" />
                 </div>
