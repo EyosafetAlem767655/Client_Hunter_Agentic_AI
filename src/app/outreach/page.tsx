@@ -71,7 +71,7 @@ export default async function OutreachPage({
               }}
               className={`rounded-lg px-3 py-1.5 text-sm transition ${
                 activeWindow === w.value
-                  ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow"
+                  ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow"
                   : "text-foreground/70 hover:text-foreground"
               }`}
             >

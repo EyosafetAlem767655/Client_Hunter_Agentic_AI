@@ -28,7 +28,7 @@ export const metadata: Metadata = {
       "Daily VA job scraping + GPT scoring + outreach, on Vercel Hobby.",
     type: "website",
   },
-  themeColor: "#0a0a14",
+  themeColor: "#04140f",
 };
 
 const nav = [
@@ -53,7 +53,7 @@ export default function RootLayout({
               href="/"
               className="flex items-center gap-2 text-lg font-semibold tracking-tight"
             >
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-500/40">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 text-white shadow-lg shadow-emerald-500/40">
                 <svg
                   viewBox="0 0 24 24"
                   fill="none"
@@ -67,7 +67,7 @@ export default function RootLayout({
                 </svg>
               </span>
               Talent
-              <span className="bg-gradient-to-r from-violet-300 to-fuchsia-300 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text text-transparent">
                 Bridge
               </span>
             </Link>

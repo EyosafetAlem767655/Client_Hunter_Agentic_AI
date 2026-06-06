@@ -32,13 +32,13 @@ export default async function DashboardPage({
   return (
     <div className="space-y-10">
       {/* Hero */}
-      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-violet-600/20 via-fuchsia-500/10 to-sky-500/10 p-8 sm:p-10 backdrop-blur-xl">
+      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-emerald-600/20 via-teal-500/10 to-amber-400/10 p-8 sm:p-10 backdrop-blur-xl">
         <div
-          className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full bg-violet-500/30 blur-3xl"
+          className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full bg-emerald-500/30 blur-3xl"
           aria-hidden
         />
         <div
-          className="pointer-events-none absolute -bottom-32 -right-16 h-80 w-80 rounded-full bg-sky-500/20 blur-3xl"
+          className="pointer-events-none absolute -bottom-32 -right-16 h-80 w-80 rounded-full bg-amber-400/20 blur-3xl"
           aria-hidden
         />
 
@@ -52,20 +52,18 @@ export default async function DashboardPage({
               Agentic pipeline · {dryRun ? "Dry run" : "Live"}
             </div>
             <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-              <span className="bg-gradient-to-r from-violet-300 via-fuchsia-200 to-sky-300 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-emerald-300 via-teal-200 to-cyan-300 bg-clip-text text-transparent">
                 Talent
               </span>
               <span className="text-foreground">Bridge</span>
             </h1>
             <p className="mt-3 text-base text-foreground/80 sm:text-lg">
-              An autonomous agent that scrapes US &amp; European job boards for
-              virtual-assistant openings, filters them with GPT, and pitches
-              your vetted offshore talent — every morning, automatically.
+              Top-tier talent. Sensible overhead.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link
                 href="/settings"
-                className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/30 transition hover:from-violet-400 hover:to-fuchsia-400"
+                className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:from-emerald-400 hover:to-cyan-400"
               >
                 <Zap className="h-4 w-4" />
                 Run scrape now
@@ -126,7 +124,7 @@ export default async function DashboardPage({
                 scroll={false}
                 className={`rounded-lg px-3 py-1.5 text-sm transition ${
                   timeWindow === opt.value
-                    ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow"
+                    ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow"
                     : "text-foreground/70 hover:text-foreground"
                 }`}
               >

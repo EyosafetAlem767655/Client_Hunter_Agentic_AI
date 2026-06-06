@@ -73,7 +73,7 @@ describe("discoverNextContacts (1-by-1 loop)", () => {
     expect(listTopRelevantWithoutContacts).toHaveBeenCalledWith(1);
   });
 
-  it("returns null when neither body nor Grok nor fallback finds anything", async () => {
+  it("marks the posting as skipped when neither body nor Grok nor fallback finds anything", async () => {
     listTopRelevantWithoutContacts.mockResolvedValue([jobRow(1, "GhostCo")]);
     discoverViaGrokBatch.mockResolvedValue(new Map());
     discoverContactsForPosting.mockResolvedValue([]);
@@ -84,7 +84,14 @@ describe("discoverNextContacts (1-by-1 loop)", () => {
     expect(out.found).toBe(0);
     expect(out.results[0].email).toBeNull();
     expect(out.results[0].method).toBeNull();
-    expect(upsertContact).not.toHaveBeenCalled();
+    // Sentinel row inserted so the loop advances — was the infinite-loop bug.
+    expect(upsertContact).toHaveBeenCalledTimes(1);
+    expect(upsertContact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postingId: 1,
+        sourceType: "skipped",
+      })
+    );
   });
 
   it("clamps n to [1, 5]", async () => {

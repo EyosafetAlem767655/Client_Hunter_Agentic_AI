@@ -29,6 +29,31 @@ import { withConcurrency } from "./reasoning";
 export const GROK_LOOKUP_BATCH_SIZE = 3;
 
 /**
+ * Sentinel sourceType for "we tried to discover an email for this posting
+ * and came up empty." A row with this sourceType counts as a contact for
+ * the purposes of `listTopRelevantWithoutContacts` (so the 1-by-1 loop
+ * advances to the next pending job) but is filtered out everywhere else
+ * — dashboard counts, draft queue, with-contact page.
+ */
+export const SKIPPED_SOURCE_TYPE = "skipped";
+
+async function markPostingSkipped(postingId: number): Promise<void> {
+  try {
+    await memory.upsertContact({
+      postingId,
+      email: `__skipped-${postingId}@talentbridge.skip`,
+      sourceType: SKIPPED_SOURCE_TYPE,
+      confidence: "0.00",
+    });
+  } catch (e) {
+    await logEvent("warn", "Failed to mark posting as skipped", {
+      postingId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+/**
  * Process the next N pending jobs through the contact-discovery chain
  * (body → batched Grok → DDG → on-site → pattern). The "1-by-1" UI loop
  * calls this with limit=1 (or 2) so each HTTP request finishes in well
@@ -161,6 +186,7 @@ export async function discoverNextContacts(limit: number): Promise<{
             method: "fallback",
           });
         } else {
+          await markPostingSkipped(row.posting.id);
           results.push({
             postingId: row.posting.id,
             company: row.posting.company,
@@ -174,6 +200,7 @@ export async function discoverNextContacts(limit: number): Promise<{
           postingId: row.posting.id,
           error: e instanceof Error ? e.message : String(e),
         });
+        await markPostingSkipped(row.posting.id);
         results.push({
           postingId: row.posting.id,
           company: row.posting.company,
@@ -185,6 +212,9 @@ export async function discoverNextContacts(limit: number): Promise<{
     }
   } else {
     for (const row of stillMissing) {
+      // No Grok available and no body email — mark as skipped so the
+      // pending queue advances on the next loop iteration.
+      await markPostingSkipped(row.posting.id);
       results.push({
         postingId: row.posting.id,
         company: row.posting.company,

@@ -53,6 +53,8 @@ export function SettingsClient({
   const [discoveryProgress, setDiscoveryProgress] = useState<{
     totalRelevant: number;
     withContacts: number;
+    attempted: number;
+    skipped: number;
     pending: number;
     nextCompany: string | null;
   } | null>(null);
@@ -88,6 +90,8 @@ export function SettingsClient({
           setDiscoveryProgress({
             totalRelevant: data.totalRelevant ?? 0,
             withContacts: data.withContacts ?? 0,
+            attempted: data.attempted ?? 0,
+            skipped: data.skipped ?? 0,
             pending: data.pending ?? 0,
             nextCompany: data.nextCompany ?? null,
           });
@@ -280,6 +284,8 @@ export function SettingsClient({
           progress?: {
             totalRelevant: number;
             withContacts: number;
+            attempted: number;
+            skipped: number;
             pending: number;
             nextCompany: string | null;
           };
@@ -446,14 +452,14 @@ export function SettingsClient({
 
       {/* Post-scrape countdown */}
       {scrapeCountdown !== null && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-violet-500/40 bg-violet-500/10 px-5 py-4">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-5 py-4">
           <div className="flex items-center gap-3">
-            <Loader2 className="h-5 w-5 animate-spin text-violet-300" />
+            <Loader2 className="h-5 w-5 animate-spin text-emerald-300" />
             <div>
-              <div className="text-sm font-medium text-violet-100">
+              <div className="text-sm font-medium text-emerald-100">
                 Auto-starting email discovery in {scrapeCountdown}s
               </div>
-              <div className="text-xs text-violet-200/80">
+              <div className="text-xs text-emerald-200/80">
                 Lets the LLM filter commits settle before Grok looks up the
                 relevant companies, one at a time.
               </div>
@@ -463,7 +469,7 @@ export function SettingsClient({
             size="sm"
             variant="outline"
             onClick={cancelCountdown}
-            className="border-violet-400/40 text-violet-200 hover:bg-violet-500/10"
+            className="border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/10"
           >
             Cancel
           </Button>
@@ -517,23 +523,28 @@ export function SettingsClient({
           </p>
           {(() => {
             const total = discoveryProgress?.totalRelevant ?? 0;
-            const done = discoveryProgress?.withContacts ?? 0;
+            const found = discoveryProgress?.withContacts ?? 0;
+            const attempted = discoveryProgress?.attempted ?? 0;
+            const skipped = discoveryProgress?.skipped ?? 0;
             const pending = discoveryProgress?.pending ?? 0;
-            const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+            // The bar tracks "attempted" so it advances when companies are
+            // skipped — otherwise it would stall on every unfindable one.
+            const pct = total > 0 ? Math.min(100, Math.round((attempted / total) * 100)) : 0;
             return (
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>
-                    {done.toLocaleString()} / {total.toLocaleString()} relevant
-                    jobs have contacts · {pending.toLocaleString()} pending
+                    {found.toLocaleString()} found ·{" "}
+                    {skipped.toLocaleString()} no match · {pending.toLocaleString()} pending
+                    {" · "}of {total.toLocaleString()} relevant
                   </span>
                   <span className="font-mono">{pct}%</span>
                 </div>
                 <div className="h-2 w-full overflow-hidden rounded-full bg-background/60 ring-1 ring-border/40">
                   <div
-                    className={`h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-[width] duration-500 ${
+                    className={`h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-[width] duration-500 ${
                       discoveryActive
-                        ? "shadow-[0_0_10px_rgba(168,85,247,0.5)]"
+                        ? "shadow-[0_0_12px_rgba(16,185,129,0.55)]"
                         : ""
                     }`}
                     style={{ width: `${pct}%` }}
@@ -557,7 +568,7 @@ export function SettingsClient({
                 <span>Recent finds:</span>
                 <a
                   href="/jobs?status=with-contact&window=all"
-                  className="text-violet-300 hover:text-violet-200 underline-offset-2 hover:underline"
+                  className="text-emerald-300 hover:text-emerald-200 underline-offset-2 hover:underline"
                 >
                   View all contacts →
                 </a>
@@ -569,12 +580,12 @@ export function SettingsClient({
                 >
                   <a
                     href={`/jobs?status=with-contact&window=all`}
-                    className="truncate transition hover:text-violet-200"
+                    className="truncate transition hover:text-emerald-200"
                     title={`Open ${row.company} in the jobs list`}
                   >
                     <span className="font-medium">{row.company}</span>
                     {row.method && (
-                      <span className="ml-2 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-violet-300">
+                      <span className="ml-2 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300">
                         {row.method}
                       </span>
                     )}
@@ -637,6 +648,8 @@ export function SettingsClient({
                             setDiscoveryProgress({
                               totalRelevant: p.totalRelevant ?? 0,
                               withContacts: p.withContacts ?? 0,
+                              attempted: p.attempted ?? 0,
+                              skipped: p.skipped ?? 0,
                               pending: p.pending ?? 0,
                               nextCompany: p.nextCompany ?? null,
                             });
@@ -659,7 +672,7 @@ export function SettingsClient({
                   })
                 }
                 icon={<Play className="h-5 w-5" />}
-                gradient="from-violet-500/30 to-fuchsia-500/20"
+                gradient="from-emerald-500/30 to-cyan-500/20"
                 primary
               />
               <ActionTile
@@ -669,7 +682,7 @@ export function SettingsClient({
                 loading={loading === "Outreach"}
                 onClick={() => runManual("/api/manual/outreach", "Outreach")}
                 icon={<Mail className="h-5 w-5" />}
-                gradient="from-sky-500/30 to-emerald-500/20"
+                gradient="from-cyan-500/30 to-teal-500/20"
               />
               <ActionTile
                 title="Send test email"
@@ -678,7 +691,7 @@ export function SettingsClient({
                 loading={loading === "Test email"}
                 onClick={() => runManual("/api/manual/test-email", "Test email")}
                 icon={<Send className="h-5 w-5" />}
-                gradient="from-emerald-500/30 to-teal-500/20"
+                gradient="from-teal-500/30 to-emerald-500/20"
               />
               <ActionTile
                 title="Send digest now"

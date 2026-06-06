@@ -7,9 +7,12 @@ import {
   inArray,
   isNull,
   lt,
+  ne,
   notInArray,
   sql,
 } from "drizzle-orm";
+
+const SKIPPED_SOURCE = "skipped";
 import type { RawPosting } from "@/types";
 import { getDb } from "./index";
 import {
@@ -131,6 +134,8 @@ export async function listTopRelevantWithoutContacts(limit: number) {
 export async function getDiscoveryProgress(): Promise<{
   totalRelevant: number;
   withContacts: number;
+  attempted: number;
+  skipped: number;
   pending: number;
   nextCompany: string | null;
 }> {
@@ -140,13 +145,22 @@ export async function getDiscoveryProgress(): Promise<{
     .from(filteredJobs)
     .where(eq(filteredJobs.isRelevant, true));
 
-  const withContactsRows = await db
+  // Every distinct posting that has *any* contact row, sentinels included.
+  const attemptedRows = await db
     .selectDistinct({ postingId: contacts.postingId })
     .from(contacts);
+  const attempted = attemptedRows.length;
+
+  // Only real, useful contacts (no sentinels).
+  const withContactsRows = await db
+    .selectDistinct({ postingId: contacts.postingId })
+    .from(contacts)
+    .where(ne(contacts.sourceType, SKIPPED_SOURCE));
   const withContacts = withContactsRows.length;
 
   const totalRelevant = totalRow?.total ?? 0;
-  const pending = Math.max(0, totalRelevant - withContacts);
+  const skipped = attempted - withContacts;
+  const pending = Math.max(0, totalRelevant - attempted);
 
   const [nextRow] = await db
     .select({ company: jobPostings.company })
@@ -160,6 +174,8 @@ export async function getDiscoveryProgress(): Promise<{
   return {
     totalRelevant,
     withContacts,
+    attempted,
+    skipped,
     pending,
     nextCompany: nextRow?.company ?? null,
   };
@@ -193,7 +209,12 @@ export async function listJobsNeedingDraft(limit: number) {
     .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
     .innerJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
     .leftJoin(outreachEmails, eq(outreachEmails.contactId, contacts.id))
-    .where(isNull(outreachEmails.id))
+    .where(
+      and(
+        isNull(outreachEmails.id),
+        ne(contacts.sourceType, SKIPPED_SOURCE)
+      )
+    )
     .limit(limit);
 }
 
@@ -487,7 +508,8 @@ export async function getDashboardStats(timeWindow = "7d") {
 
   const [withContacts] = await db
     .select({ total: count() })
-    .from(contacts);
+    .from(contacts)
+    .where(ne(contacts.sourceType, SKIPPED_SOURCE));
 
   const [drafted] = await db
     .select({ total: count() })
@@ -576,7 +598,7 @@ export async function listJobsPaginated(params: {
 
   if (params.status === "with-contact") {
     // No time window — these are pipeline rows, not events.
-    const where = undefined;
+    const where = ne(contacts.sourceType, SKIPPED_SOURCE);
     const items = await db
       .select({
         posting: jobPostings,

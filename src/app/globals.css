@@ -4,23 +4,26 @@
 
 @layer base {
   :root {
-    --background: 222 47% 6%;
-    --foreground: 210 40% 96%;
-    --card: 222 40% 10%;
-    --card-foreground: 210 40% 96%;
-    --primary: 262 83% 58%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 96%;
-    --muted: 217 33% 14%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 262 50% 20%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62% 50%;
+    /* Cool, slate-leaning dark background instead of a purple-tinged one. */
+    --background: 200 30% 5%;
+    --foreground: 180 20% 96%;
+    --card: 195 30% 9%;
+    --card-foreground: 180 20% 96%;
+    /* Emerald primary — vivid but professional, no purple anywhere. */
+    --primary: 160 84% 39%;
+    --primary-foreground: 160 20% 99%;
+    --secondary: 200 25% 14%;
+    --secondary-foreground: 180 20% 96%;
+    --muted: 200 25% 12%;
+    --muted-foreground: 195 12% 65%;
+    /* Amber accent — warm gold for highlights. */
+    --accent: 38 95% 55%;
+    --accent-foreground: 38 70% 8%;
+    --destructive: 0 70% 55%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217 33% 20%;
-    --input: 217 33% 18%;
-    --ring: 262 83% 58%;
+    --border: 200 22% 18%;
+    --input: 200 22% 16%;
+    --ring: 160 84% 39%;
     --radius: 0.75rem;
   }
 
@@ -50,18 +53,20 @@
   height: 60vw;
   border-radius: 50%;
   filter: blur(80px);
-  opacity: 0.35;
+  opacity: 0.32;
   animation: mesh-drift 18s ease-in-out infinite alternate;
 }
 
+/* Emerald glow top-left. */
 .mesh-bg::before {
-  background: radial-gradient(circle, hsl(262 83% 45%) 0%, transparent 70%);
+  background: radial-gradient(circle, hsl(160 84% 45%) 0%, transparent 70%);
   top: -10%;
   left: -10%;
 }
 
+/* Amber glow bottom-right. */
 .mesh-bg::after {
-  background: radial-gradient(circle, hsl(199 89% 40%) 0%, transparent 70%);
+  background: radial-gradient(circle, hsl(38 95% 50%) 0%, transparent 70%);
   bottom: -20%;
   right: -10%;
   animation-delay: -9s;

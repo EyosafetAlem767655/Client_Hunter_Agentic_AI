@@ -15,12 +15,12 @@ export function PipelineFunnel({
   stats: Record<string, number>;
 }) {
   const data = [
-    { name: "Scraped", value: stats.scraped ?? 0, fill: "#a78bfa" },
-    { name: "Relevant", value: stats.relevant ?? 0, fill: "#c084fc" },
-    { name: "Contact", value: stats.contactsFound ?? 0, fill: "#818cf8" },
+    { name: "Scraped", value: stats.scraped ?? 0, fill: "#10b981" },
+    { name: "Relevant", value: stats.relevant ?? 0, fill: "#14b8a6" },
+    { name: "Contact", value: stats.contactsFound ?? 0, fill: "#06b6d4" },
     { name: "Drafted", value: stats.drafted ?? 0, fill: "#38bdf8" },
-    { name: "Sent", value: stats.sent ?? 0, fill: "#2dd4bf" },
-    { name: "Replied", value: stats.replied ?? 0, fill: "#34d399" },
+    { name: "Sent", value: stats.sent ?? 0, fill: "#fbbf24" },
+    { name: "Replied", value: stats.replied ?? 0, fill: "#fb7185" },
   ];
 
   return (
