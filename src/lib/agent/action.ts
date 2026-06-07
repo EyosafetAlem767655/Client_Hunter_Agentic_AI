@@ -44,15 +44,6 @@ function methodForContact(contact: DiscoveredContact | null): DiscoveryMethod {
   }
 }
 
-function postingUrlOnlyContact(url: string): DiscoveredContact {
-  return {
-    email: null,
-    contactUrl: url,
-    sourceType: "url_only",
-    confidence: 0.2,
-  };
-}
-
 async function persistDiscoveredContact(
   postingId: number,
   contact: DiscoveredContact
@@ -66,12 +57,22 @@ async function persistDiscoveredContact(
   });
 }
 
+async function markNoContactUrl(postingId: number): Promise<void> {
+  await memory.upsertContact({
+    postingId,
+    email: null,
+    contactUrl: null,
+    sourceType: "no_contact_url",
+    confidence: "0.00",
+  });
+}
+
 async function discoverBestForPosting(posting: {
   id: number;
   description: string;
   url: string;
   company: string;
-}): Promise<DiscoveredContact> {
+}): Promise<DiscoveredContact | null> {
   const fromBody = pickBestContact(discoverFromBody(posting.description));
   if (fromBody) return fromBody;
 
@@ -80,13 +81,13 @@ async function discoverBestForPosting(posting: {
     url: posting.url,
     company: posting.company,
   });
-  return pickBestContact(discovered) ?? postingUrlOnlyContact(posting.url);
+  return pickBestContact(discovered);
 }
 
 /**
  * Process the next N pending jobs through contact discovery. Every attempted
- * relevant posting gets a contact row: a deliverable email when extraction
- * succeeds, otherwise a URL-only row for manual review and progress tracking.
+ * relevant posting gets either a real contact row or a no-contact marker.
+ * Job-board posting URLs are never saved as contact URLs.
  */
 export async function discoverNextContacts(limit: number): Promise<{
   attempted: number;
@@ -101,23 +102,10 @@ export async function discoverNextContacts(limit: number): Promise<{
   let found = 0;
 
   for (const row of jobs) {
-    let best: DiscoveredContact;
     try {
-      best = await discoverBestForPosting(row.posting);
-      await persistDiscoveredContact(row.posting.id, best);
-      found++;
-    } catch (e) {
-      best = postingUrlOnlyContact(row.posting.url);
-      try {
-        await persistDiscoveredContact(row.posting.id, best);
-        found++;
-      } catch (inner) {
-        await logEvent("warn", "Contact discovery upsert failed", {
-          postingId: row.posting.id,
-          company: row.posting.company,
-          error: inner instanceof Error ? inner.message : String(inner),
-          discoveryError: e instanceof Error ? e.message : String(e),
-        });
+      const best = await discoverBestForPosting(row.posting);
+      if (!best) {
+        await markNoContactUrl(row.posting.id);
         results.push({
           postingId: row.posting.id,
           company: row.posting.company,
@@ -128,16 +116,38 @@ export async function discoverNextContacts(limit: number): Promise<{
         });
         continue;
       }
+      await persistDiscoveredContact(row.posting.id, best);
+      found++;
+      results.push({
+        postingId: row.posting.id,
+        company: row.posting.company,
+        title: row.posting.title,
+        email: best.email,
+        contactUrl: best.contactUrl ?? null,
+        method: methodForContact(best),
+      });
+    } catch (e) {
+      await logEvent("warn", "Contact discovery failed", {
+        postingId: row.posting.id,
+        company: row.posting.company,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      await markNoContactUrl(row.posting.id).catch((inner) =>
+        logEvent("warn", "No-contact marker upsert failed", {
+          postingId: row.posting.id,
+          company: row.posting.company,
+          error: inner instanceof Error ? inner.message : String(inner),
+        })
+      );
+      results.push({
+        postingId: row.posting.id,
+        company: row.posting.company,
+        title: row.posting.title,
+        email: null,
+        contactUrl: null,
+        method: null,
+      });
     }
-
-    results.push({
-      postingId: row.posting.id,
-      company: row.posting.company,
-      title: row.posting.title,
-      email: best.email,
-      contactUrl: best.contactUrl ?? null,
-      method: methodForContact(best),
-    });
   }
 
   return { attempted: jobs.length, found, results };
@@ -153,16 +163,34 @@ export async function discoverContactsForTopJobs(
     jobs,
     CONTACT_DISCOVERY_CONCURRENCY,
     async ({ posting }) => {
-      let best: DiscoveredContact;
+      let best: DiscoveredContact | null;
       try {
         best = await discoverBestForPosting(posting);
       } catch (error) {
-        await logEvent("warn", "Contact discovery failed; saving posting URL", {
+        await logEvent("warn", "Contact discovery failed", {
           postingId: posting.id,
           company: posting.company,
           error: error instanceof Error ? error.message : String(error),
         });
-        best = postingUrlOnlyContact(posting.url);
+        await markNoContactUrl(posting.id).catch((inner) =>
+          logEvent("warn", "No-contact marker upsert failed", {
+            postingId: posting.id,
+            company: posting.company,
+            error: inner instanceof Error ? inner.message : String(inner),
+          })
+        );
+        return false;
+      }
+
+      if (!best) {
+        await markNoContactUrl(posting.id).catch((error) =>
+          logEvent("warn", "No-contact marker upsert failed", {
+            postingId: posting.id,
+            company: posting.company,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        );
+        return false;
       }
 
       try {

@@ -24,7 +24,8 @@ export type ContactSourceType =
   | "pattern_guessed"
   | "scraped_from_site"
   | "langsearch_scraped"
-  | "url_only";
+  | "url_only"
+  | "no_contact_url";
 
 export interface DiscoveredContact {
   email: string | null;

@@ -5,7 +5,8 @@ Search LangSearch for likely contact-page URLs for a company.
 The request body accepts:
   { "company": "CRAE GROUP LTD", "count": 5 }
 
-The response normalizes LangSearch's nested `data.webPages.value` shape into:
+The response normalizes LangSearch's `data.webPages.value` or top-level
+`results` shape into:
   { "results": [{ "title", "url", "displayUrl", "snippet", "summary" }] }
 """
 
@@ -36,14 +37,30 @@ def _authorized(headers) -> bool:
     return False
 
 
-def _parse_results(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    value = (
+def _raw_results(payload: dict[str, Any]) -> list[Any]:
+    top_level = payload.get("results")
+    if isinstance(top_level, list):
+        return top_level
+
+    nested = (
         payload.get("data", {})
         .get("webPages", {})
         .get("value", [])
     )
-    if not isinstance(value, list):
-        return []
+    if isinstance(nested, list):
+        return nested
+    return []
+
+
+def _first_string(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def _parse_results(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    value = _raw_results(payload)
 
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -58,17 +75,11 @@ def _parse_results(payload: dict[str, Any]) -> list[dict[str, Any]]:
         seen.add(url)
         results.append(
             {
-                "title": item.get("name") if isinstance(item.get("name"), str) else "",
+                "title": _first_string(item.get("title"), item.get("name")),
                 "url": url,
-                "displayUrl": item.get("displayUrl")
-                if isinstance(item.get("displayUrl"), str)
-                else url,
-                "snippet": item.get("snippet")
-                if isinstance(item.get("snippet"), str)
-                else "",
-                "summary": item.get("summary")
-                if isinstance(item.get("summary"), str)
-                else "",
+                "displayUrl": _first_string(item.get("displayUrl"), url),
+                "snippet": _first_string(item.get("snippet")),
+                "summary": _first_string(item.get("summary")),
             }
         )
     return results

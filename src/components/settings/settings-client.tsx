@@ -539,8 +539,8 @@ export function SettingsClient({
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>
-                    {found.toLocaleString()} attempted ·{" "}
-                    {skipped.toLocaleString()} legacy skipped · {pending.toLocaleString()} pending
+                    {found.toLocaleString()} with contact ·{" "}
+                    {skipped.toLocaleString()} no company URL · {pending.toLocaleString()} pending
                     {" · "}of {total.toLocaleString()} relevant
                   </span>
                   <span className="font-mono">{pct}%</span>

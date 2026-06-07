@@ -105,7 +105,7 @@ describe("LangSearch contact discovery", () => {
     ]);
   });
 
-  it("saves the posting URL when LangSearch yields no usable URL", async () => {
+  it("returns no contact when LangSearch yields no usable company URL", async () => {
     mocks.filterContactUrls.mockResolvedValue([]);
     const { discoverContactsForPosting } = await import("@/lib/contact/discovery");
 
@@ -115,14 +115,7 @@ describe("LangSearch contact discovery", () => {
       url: "https://jobboard.example/jobs/ghost",
     });
 
-    expect(out).toEqual([
-      {
-        email: null,
-        contactUrl: "https://jobboard.example/jobs/ghost",
-        sourceType: "url_only",
-        confidence: 0.2,
-      },
-    ]);
+    expect(out).toEqual([]);
   });
 
   it("returns body emails before doing LangSearch work", async () => {

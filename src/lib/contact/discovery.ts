@@ -264,9 +264,10 @@ export async function discoverViaLangSearch(
 ): Promise<DiscoveredContact[]> {
   const normalizedCompany = company.trim();
   if (!normalizedCompany || normalizedCompany.length < 2) {
-    return posting?.url ? [urlOnlyContact(posting.url, 0.2)] : [];
+    return [];
   }
 
+  void posting;
   let candidateUrls: string[] = [];
   try {
     const results = await findContactUrls(normalizedCompany);
@@ -279,7 +280,7 @@ export async function discoverViaLangSearch(
   }
 
   if (candidateUrls.length === 0) {
-    return posting?.url ? [urlOnlyContact(posting.url, 0.2)] : [];
+    return [];
   }
 
   const { emails, urls } = await scrapeAndExtract(candidateUrls);
@@ -452,7 +453,7 @@ export async function discoverContactsForPosting(
     if (fromLangSearch.length > 0) return fromLangSearch;
   }
 
-  return posting.url ? [urlOnlyContact(posting.url, 0.2)] : [];
+  return [];
 }
 
 export function extractCompanyUrlFromDescription(description: string): string | null {

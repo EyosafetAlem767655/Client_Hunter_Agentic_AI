@@ -8,12 +8,11 @@ import {
   inArray,
   isNull,
   lt,
-  ne,
   notInArray,
   sql,
 } from "drizzle-orm";
 
-const SKIPPED_SOURCE = "skipped";
+const NON_CONTACT_SOURCE_TYPES = ["skipped", "no_contact_url"];
 import type { RawPosting } from "@/types";
 import { getDb } from "./index";
 import {
@@ -156,7 +155,7 @@ export async function getDiscoveryProgress(): Promise<{
   const withContactsRows = await db
     .selectDistinct({ postingId: contacts.postingId })
     .from(contacts)
-    .where(ne(contacts.sourceType, SKIPPED_SOURCE));
+    .where(notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES));
   const withContacts = withContactsRows.length;
 
   const totalRelevant = totalRow?.total ?? 0;
@@ -189,7 +188,7 @@ export async function upsertContact(data: {
   sourceType: string;
   confidence: string;
 }) {
-  if (!data.email && !data.contactUrl) {
+  if (!data.email && !data.contactUrl && data.sourceType !== "no_contact_url") {
     throw new Error("upsertContact requires email or contactUrl");
   }
   const db = getDb();
@@ -219,7 +218,7 @@ export async function listJobsNeedingDraft(limit: number) {
       and(
         isNull(outreachEmails.id),
         isNotNull(contacts.email),
-        ne(contacts.sourceType, SKIPPED_SOURCE)
+        notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES)
       )
     )
     .limit(limit);
@@ -516,7 +515,7 @@ export async function getDashboardStats(timeWindow = "7d") {
   const [withContacts] = await db
     .select({ total: count() })
     .from(contacts)
-    .where(ne(contacts.sourceType, SKIPPED_SOURCE));
+    .where(notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES));
 
   const [drafted] = await db
     .select({ total: count() })
@@ -605,7 +604,7 @@ export async function listJobsPaginated(params: {
 
   if (params.status === "with-contact") {
     // No time window — these are pipeline rows, not events.
-    const where = ne(contacts.sourceType, SKIPPED_SOURCE);
+    const where = notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES);
     const items = await db
       .select({
         posting: jobPostings,

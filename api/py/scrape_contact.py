@@ -112,7 +112,7 @@ def _extract_with_requests(url: str) -> dict[str, Any]:
     )
     response.raise_for_status()
     html = response.text
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, "html.parser")
 
     # Strip script / style so the text blob doesn't have minified JS noise.
     for bad in soup(["script", "style", "noscript"]):
@@ -156,7 +156,7 @@ def _extract_with_playwright(sync_playwright, url: str) -> dict[str, Any]:
             )
             text = page.evaluate("() => document.body.innerText") or ""
             html = page.content()
-            soup = BeautifulSoup(html, "lxml")
+            soup = BeautifulSoup(html, "html.parser")
             for bad in soup(["script", "style", "noscript"]):
                 bad.decompose()
             elements = _structured_elements(soup)

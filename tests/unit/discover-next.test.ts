@@ -108,25 +108,47 @@ describe("discoverNextContacts", () => {
     });
   });
 
-  it("saves posting URL fallback if discovery throws before finding a URL", async () => {
+  it("does not save the job posting URL if discovery fails before finding a contact URL", async () => {
     mocks.listTopRelevantWithoutContacts.mockResolvedValue([jobRow(3, "ErrCo")]);
     mocks.discoverContactsForPosting.mockRejectedValue(new Error("search down"));
 
     const { discoverNextContacts } = await import("@/lib/agent/action");
     const out = await discoverNextContacts(1);
 
-    expect(out.found).toBe(1);
+    expect(out.found).toBe(0);
     expect(out.results[0]).toMatchObject({
       email: null,
-      contactUrl: "https://jobboard.example/3",
-      method: "url_only",
+      contactUrl: null,
+      method: null,
     });
     expect(mocks.upsertContact).toHaveBeenCalledWith({
       postingId: 3,
       email: null,
-      contactUrl: "https://jobboard.example/3",
-      sourceType: "url_only",
-      confidence: "0.20",
+      contactUrl: null,
+      sourceType: "no_contact_url",
+      confidence: "0.00",
+    });
+  });
+
+  it("does not save the job posting URL when discovery returns no contact URL", async () => {
+    mocks.listTopRelevantWithoutContacts.mockResolvedValue([jobRow(5, "NoUrlCo")]);
+    mocks.discoverContactsForPosting.mockResolvedValue([]);
+
+    const { discoverNextContacts } = await import("@/lib/agent/action");
+    const out = await discoverNextContacts(1);
+
+    expect(out.found).toBe(0);
+    expect(out.results[0]).toMatchObject({
+      email: null,
+      contactUrl: null,
+      method: null,
+    });
+    expect(mocks.upsertContact).toHaveBeenCalledWith({
+      postingId: 5,
+      email: null,
+      contactUrl: null,
+      sourceType: "no_contact_url",
+      confidence: "0.00",
     });
   });
 
