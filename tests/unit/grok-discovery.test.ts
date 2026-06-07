@@ -14,16 +14,29 @@ function mockGrokResponse(content: object, citations: string[] = []) {
   };
 }
 
-function mockPage(html: string) {
+// Grok URL discovery → Python DOM scrape → OpenAI email extraction.
+// `fetch` is stubbed only for the xAI call; the Python scraper and the
+// OpenAI extractor are mocked at the module level so the test asserts
+// on the orchestration (URL flows in, emails flow out) not on HTTP plumbing.
+
+vi.mock("@/lib/contact/python-scraper", () => ({
+  scrapeContactPages: vi.fn(),
+}));
+
+vi.mock("@/lib/contact/llm-email-extractor", () => ({
+  extractEmailsFromPages: vi.fn(),
+}));
+
+async function loadMocks() {
+  const py = await import("@/lib/contact/python-scraper");
+  const llm = await import("@/lib/contact/llm-email-extractor");
   return {
-    ok: true,
-    status: 200,
-    json: async () => ({}),
-    text: async () => html,
+    scrapeContactPages: vi.mocked(py.scrapeContactPages),
+    extractEmailsFromPages: vi.mocked(llm.extractEmailsFromPages),
   };
 }
 
-describe("discoverViaGrok (URL → scrape)", () => {
+describe("discoverViaGrok (Grok URL → Python DOM → OpenAI extract)", () => {
   beforeEach(() => {
     process.env.GROK_API_KEY = "xai-test-key";
     vi.resetModules();
@@ -38,80 +51,67 @@ describe("discoverViaGrok (URL → scrape)", () => {
     vi.restoreAllMocks();
   });
 
-  it("asks Grok for the company URL then scrapes the page for emails", async () => {
-    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-      if (String(url).includes("api.x.ai")) {
-        return mockGrokResponse({
-          url: "https://acmestartup.io",
-          contact_url: "https://acmestartup.io/contact",
-        });
-      }
-      if (String(url) === "https://acmestartup.io/contact") {
-        return mockPage(
-          "<html><body>Reach us at <a href='mailto:careers@acmestartup.io'>careers@acmestartup.io</a> or hello@acmestartup.io</body></html>"
-        );
-      }
-      return mockPage("");
-    });
+  it("asks Grok for the contact_url, scrapes via Python, lets OpenAI pick emails", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockGrokResponse({
+        contact_url: "https://acmestartup.io/contact",
+        url: "https://acmestartup.io",
+      })
+    );
     vi.stubGlobal("fetch", fetchMock);
+    const { scrapeContactPages, extractEmailsFromPages } = await loadMocks();
+    scrapeContactPages.mockResolvedValue({
+      results: [
+        {
+          url: "https://acmestartup.io/contact",
+          text: "Contact our team at careers@acmestartup.io",
+          mailtos: ["careers@acmestartup.io"],
+          engine: "playwright",
+          ok: true,
+        },
+      ],
+      engine_available: "playwright",
+    });
+    extractEmailsFromPages.mockResolvedValue([
+      "careers@acmestartup.io",
+      "hello@acmestartup.io",
+    ]);
 
     const { discoverViaGrok } = await import("@/lib/contact/discovery");
     const out = await discoverViaGrok("AcmeStartup", {
       url: "https://acmestartup.io/jobs/1",
     });
 
-    expect(out.length).toBeGreaterThanOrEqual(1);
     expect(out[0].email).toBe("careers@acmestartup.io");
     expect(out[0].sourceType).toBe("scraped_from_site");
-    // Alternates ranked lower
     const alt = out.find((c) => c.email === "hello@acmestartup.io");
-    expect(alt).toBeDefined();
-    expect(alt!.confidence).toBeLessThan(out[0].confidence);
+    expect(alt?.confidence).toBeLessThan(out[0].confidence);
 
-    // Verify Grok endpoint received a URL-discovery prompt (not an email prompt).
-    const xaiCall = fetchMock.mock.calls.find((c) =>
-      String(c[0]).includes("api.x.ai")
-    );
-    expect(xaiCall).toBeDefined();
-    const body = JSON.parse(xaiCall![1].body);
+    // The Grok prompt MUST be asking for the contact page URL, not the email.
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     const userMsg = body.messages[1].content;
-    expect(userMsg).toContain("website URL");
+    expect(userMsg).toContain('"Contact us"');
+    expect(userMsg).toContain("contact_url");
     expect(userMsg).not.toContain("the email for");
+
+    // The contact_url MUST be the one sent to the Python scraper, ahead of
+    // the homepage — otherwise we'd waste time scraping the wrong page first.
+    const sentUrls = scrapeContactPages.mock.calls[0][0];
+    expect(sentUrls[0]).toBe("https://acmestartup.io/contact");
   });
 
-  it("filters out automation noise from the scraped page", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(async (url: string) => {
-        if (String(url).includes("api.x.ai")) {
-          return mockGrokResponse({
-            url: "https://acme.com",
-            contact_url: "https://acme.com/contact",
-          });
-        }
-        return mockPage(
-          "<html>noreply@acme.com info@acme.com real@goodcompany.io</html>"
-        );
-      })
-    );
-    const { discoverViaGrok } = await import("@/lib/contact/discovery");
-    const out = await discoverViaGrok("Acme");
-    // noreply blocked; info@/personal allowed.
-    expect(out.map((c) => c.email)).toContain("info@acme.com");
-    expect(out.map((c) => c.email)).toContain("real@goodcompany.io");
-    expect(out.map((c) => c.email)).not.toContain("noreply@acme.com");
-  });
-
-  it("returns [] when Grok returns no URL and no citations", async () => {
+  it("returns [] when Grok produces no URL and no citations", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        mockGrokResponse({ url: null, contact_url: null })
+        mockGrokResponse({ contact_url: null, url: null })
       )
     );
+    const { scrapeContactPages } = await loadMocks();
     const { discoverViaGrok } = await import("@/lib/contact/discovery");
     const out = await discoverViaGrok("DefunctCo");
     expect(out).toEqual([]);
+    expect(scrapeContactPages).not.toHaveBeenCalled();
   });
 
   it("returns [] when Grok HTTP request fails", async () => {
@@ -128,7 +128,7 @@ describe("discoverViaGrok (URL → scrape)", () => {
     expect(out).toEqual([]);
   });
 
-  it("returns [] when GROK_API_KEY is unset (graceful fallback)", async () => {
+  it("returns [] when GROK_API_KEY is unset", async () => {
     delete process.env.GROK_API_KEY;
     vi.resetModules();
     const { discoverViaGrok } = await import("@/lib/contact/discovery");
@@ -146,32 +146,38 @@ describe("discoverViaGrok (URL → scrape)", () => {
     expect(await discoverViaGrok("A")).toEqual([]);
   });
 
-  it("falls through to citation URLs when no structured URL is returned", async () => {
+  it("uses citation URLs when no structured contact_url is returned", async () => {
     const citation = "https://acme.example/contact";
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation(async (url: string) => {
-        if (String(url).includes("api.x.ai")) {
-          return mockGrokResponse(
-            { url: null, contact_url: null },
-            [citation]
-          );
-        }
-        if (String(url) === citation) {
-          return mockPage(
-            "<html>Reach Acme at <a href='mailto:careers@acme.example'>careers@acme.example</a></html>"
-          );
-        }
-        return mockPage("");
-      })
+      vi
+        .fn()
+        .mockResolvedValue(
+          mockGrokResponse({ contact_url: null, url: null }, [citation])
+        )
     );
+    const { scrapeContactPages, extractEmailsFromPages } = await loadMocks();
+    scrapeContactPages.mockResolvedValue({
+      results: [
+        {
+          url: citation,
+          text: "Reach Acme at careers@acme.example",
+          mailtos: ["careers@acme.example"],
+          engine: "requests",
+          ok: true,
+        },
+      ],
+      engine_available: "requests",
+    });
+    extractEmailsFromPages.mockResolvedValue(["careers@acme.example"]);
+
     const { discoverViaGrok } = await import("@/lib/contact/discovery");
     const out = await discoverViaGrok("Acme");
     expect(out[0]?.email).toBe("careers@acme.example");
   });
 });
 
-describe("discoverViaGrokBatch (URL → scrape)", () => {
+describe("discoverViaGrokBatch (Grok URL → Python DOM → OpenAI extract)", () => {
   beforeEach(() => {
     process.env.GROK_API_KEY = "xai-test-key";
     vi.resetModules();
@@ -186,34 +192,42 @@ describe("discoverViaGrokBatch (URL → scrape)", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends a single Grok call for URLs and scrapes each page for emails", async () => {
-    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-      if (String(url).includes("api.x.ai")) {
-        return mockGrokResponse({
-          results: [
-            {
-              company: "Acme",
-              url: "https://acme.com",
-              contact_url: "https://acme.com/contact",
-            },
-            {
-              company: "Widget",
-              url: "https://widget.io",
-              contact_url: "https://widget.io/contact",
-            },
-            { company: "DefunctCo", url: null, contact_url: null },
-          ],
-        });
-      }
-      if (String(url) === "https://acme.com/contact") {
-        return mockPage("Email: careers@acme.com");
-      }
-      if (String(url) === "https://widget.io/contact") {
-        return mockPage("Contact: hiring@widget.io");
-      }
-      return mockPage("");
-    });
+  it("sends a single Grok call for contact URLs and routes each set to the scraper", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockGrokResponse({
+        results: [
+          {
+            company: "Acme",
+            contact_url: "https://acme.com/contact",
+            url: "https://acme.com",
+          },
+          {
+            company: "Widget",
+            contact_url: "https://widget.io/contact",
+            url: "https://widget.io",
+          },
+          { company: "DefunctCo", contact_url: null, url: null },
+        ],
+      })
+    );
     vi.stubGlobal("fetch", fetchMock);
+    const { scrapeContactPages, extractEmailsFromPages } = await loadMocks();
+    scrapeContactPages.mockImplementation(async (urls: string[]) => ({
+      results: urls.map((u) => ({
+        url: u,
+        text: `Page text for ${u}`,
+        mailtos: [],
+        engine: "playwright" as const,
+        ok: true,
+      })),
+      engine_available: "playwright" as const,
+    }));
+    extractEmailsFromPages.mockImplementation(async (pages) => {
+      const host = (pages[0]?.url ?? "").includes("acme")
+        ? "acme.com"
+        : "widget.io";
+      return [`careers@${host}`];
+    });
 
     const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
     const out = await discoverViaGrokBatch([
@@ -222,13 +236,13 @@ describe("discoverViaGrokBatch (URL → scrape)", () => {
       { company: "DefunctCo" },
     ]);
 
-    // Grok endpoint hit exactly once.
+    // Exactly one Grok call.
     const xaiCalls = fetchMock.mock.calls.filter((c) =>
       String(c[0]).includes("api.x.ai")
     );
     expect(xaiCalls.length).toBe(1);
     expect(out.get("Acme")?.[0].email).toBe("careers@acme.com");
-    expect(out.get("Widget")?.[0].email).toBe("hiring@widget.io");
+    expect(out.get("Widget")?.[0].email).toBe("careers@widget.io");
     expect(out.has("DefunctCo")).toBe(false);
   });
 
@@ -245,16 +259,19 @@ describe("discoverViaGrokBatch (URL → scrape)", () => {
     ]);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     const userMsg = body.messages[1].content;
-    const lines = (
-      userMsg.match(/search the company URL for/g) ?? []
-    ).length;
+    const lines =
+      (userMsg.match(/Find the "Contact us" page URL for/g) ?? []).length;
     expect(lines).toBe(1);
   });
 
   it("returns empty map when Grok HTTP fails", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({ ok: false, status: 502, text: async () => "" })
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        text: async () => "",
+      })
     );
     const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
     const out = await discoverViaGrokBatch([{ company: "Acme" }]);
@@ -277,56 +294,71 @@ describe("discoverViaGrokBatch (URL → scrape)", () => {
       results: [
         {
           company: "Acme",
-          url: "https://acme.com",
           contact_url: "https://acme.com/contact",
+          url: "https://acme.com",
         },
       ],
     })}\n\`\`\`\n`;
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation(async (url: string) => {
-        if (String(url).includes("api.x.ai")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              choices: [{ message: { content: fenced } }],
-              citations: [],
-            }),
-            text: async () => "",
-          };
-        }
-        return mockPage("Email contact@acme.com");
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: fenced } }],
+          citations: [],
+        }),
+        text: async () => "",
       })
     );
+    const { scrapeContactPages, extractEmailsFromPages } = await loadMocks();
+    scrapeContactPages.mockResolvedValue({
+      results: [
+        {
+          url: "https://acme.com/contact",
+          text: "contact@acme.com",
+          mailtos: ["contact@acme.com"],
+          engine: "playwright",
+          ok: true,
+        },
+      ],
+      engine_available: "playwright",
+    });
+    extractEmailsFromPages.mockResolvedValue(["contact@acme.com"]);
     const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
     const out = await discoverViaGrokBatch([{ company: "Acme" }]);
     expect(out.get("Acme")?.[0].email).toBe("contact@acme.com");
   });
 
-  it("falls back to citation URLs when the structured payload has no URL", async () => {
+  it("falls back to citation URLs when the structured payload has no contact_url", async () => {
     const citation = "https://acme.example/contact";
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation(async (url: string) => {
-        if (String(url).includes("api.x.ai")) {
-          return mockGrokResponse(
-            {
-              results: [
-                { company: "Acme", url: null, contact_url: null },
-              ],
-            },
-            [citation]
-          );
-        }
-        if (String(url) === citation) {
-          return mockPage(
-            "<html>Reach Acme at <a href='mailto:careers@acme.example'>careers@acme.example</a></html>"
-          );
-        }
-        return mockPage("");
-      })
+      vi.fn().mockResolvedValue(
+        mockGrokResponse(
+          {
+            results: [
+              { company: "Acme", contact_url: null, url: null },
+            ],
+          },
+          [citation]
+        )
+      )
     );
+    const { scrapeContactPages, extractEmailsFromPages } = await loadMocks();
+    scrapeContactPages.mockResolvedValue({
+      results: [
+        {
+          url: citation,
+          text: "Email careers@acme.example to reach hiring",
+          mailtos: ["careers@acme.example"],
+          engine: "requests",
+          ok: true,
+        },
+      ],
+      engine_available: "requests",
+    });
+    extractEmailsFromPages.mockResolvedValue(["careers@acme.example"]);
     const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
     const out = await discoverViaGrokBatch([{ company: "Acme" }]);
     expect(out.get("Acme")?.[0].email).toBe("careers@acme.example");

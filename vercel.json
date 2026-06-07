@@ -6,6 +6,9 @@
   "functions": {
     "api/py/scrape.py": {
       "maxDuration": 60
+    },
+    "api/py/scrape_contact.py": {
+      "maxDuration": 60
     }
   }
 }

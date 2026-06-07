@@ -2,6 +2,11 @@ import { env } from "@/lib/env";
 import { callGrokJson, isGrokConfigured } from "@/lib/llm/grok";
 import { assertAllowedUrl } from "@/lib/scrapers/base";
 import { logEvent } from "@/lib/agent/observability";
+import {
+  scrapeContactPages,
+  type ScrapedContactPage,
+} from "./python-scraper";
+import { extractEmailsFromPages } from "./llm-email-extractor";
 import type { DiscoveredContact } from "@/types";
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
@@ -269,19 +274,21 @@ function safeHost(url: string): string | null {
 }
 
 interface GrokUrlResult {
-  /** Primary site URL Grok found for the company. */
-  url: string | null;
-  /** Optional contact page URL on the same site. */
-  contact_url?: string | null;
+  /** URL of the company's contact / contact-us page. */
+  contact_url: string | null;
+  /** Optional homepage URL — used as a fallback if the contact page 404s. */
+  url?: string | null;
 }
 
-const GROK_SYSTEM_PROMPT = `You are GROK`;
+const GROK_SYSTEM_PROMPT = `You are a fast web researcher. Find the URL of \
+the "Contact us" page on a company's official website. Return JSON only.`;
 
 /**
- * Ask Grok to find the company's website / contact URL, then scrape that
- * page (and a few contact-style variants) for emails. We no longer ask
- * Grok for the email directly — Grok is only used for URL discovery,
- * and the email is harvested by fetching the page and regex-matching.
+ * Ask Grok specifically for the "Contact us" page URL of a company, then
+ * hand the URL(s) to the Python DOM-scrape service, then let OpenAI pick
+ * the right email from the rendered content. No more TS `fetch + regex`
+ * scraping — the regex was missing JS-rendered addresses and the OpenAI
+ * extractor handles obfuscated / "info [at] foo dot com" formats too.
  */
 export async function discoverViaGrok(
   company: string,
@@ -292,8 +299,9 @@ export async function discoverViaGrok(
 
   void posting;
   const userPrompt =
-    `search the official website URL for the company called ${company}\n\n` +
-    `Return JSON: { "url": "<https URL of the company homepage or null>", "contact_url": "<https URL of the contact page or null>" }`;
+    `Find the "Contact us" page URL for the company called "${company}".\n\n` +
+    `Return JSON: { "contact_url": "<https URL of the contact page, or null>", ` +
+    `"url": "<https URL of the company's homepage, or null>" }`;
 
   let result: Awaited<ReturnType<typeof callGrokJson<GrokUrlResult>>>;
   try {
@@ -303,7 +311,7 @@ export async function discoverViaGrok(
       searchMode: "on",
       maxSearchResults: 6,
       sources: [{ type: "web" }],
-      timeoutMs: 30_000,
+      timeoutMs: 25_000,
     });
   } catch (e) {
     await logEvent("warn", "Grok single-company HTTP error", {
@@ -313,35 +321,36 @@ export async function discoverViaGrok(
     return [];
   }
 
+  // Contact URL wins over homepage — the LLM extractor sees the contact
+  // page first and stops there if it's enough.
   const candidateUrls = collectCandidateUrls(
-    [result.data?.url ?? null, result.data?.contact_url ?? null],
+    [result.data?.contact_url ?? null, result.data?.url ?? null],
     result.raw,
     result.citations
   );
   if (candidateUrls.length === 0) return [];
 
-  const emails = await scrapeEmailsFromUrls(candidateUrls);
+  const emails = await scrapeAndExtract(candidateUrls);
   return scoreGrokEmails(emails);
 }
 
 interface GrokBatchEntry {
   /** Echo of the input company name so we can match results back. */
   company: string;
-  url: string | null;
-  contact_url?: string | null;
+  contact_url: string | null;
+  url?: string | null;
 }
 
 interface GrokBatchResult {
   results: GrokBatchEntry[];
 }
 
-const GROK_BATCH_SYSTEM_PROMPT = `You are GROK`;
+const GROK_BATCH_SYSTEM_PROMPT = GROK_SYSTEM_PROMPT;
 
 /**
- * Bulk Grok URL lookup: ask Grok to find the official website (and contact
- * page if any) for each company in a single request. For each URL, fetch
- * the page and a few standard contact paths, regex-extract emails, and
- * return the per-company contact list.
+ * Bulk Grok URL lookup: ask Grok to find the contact page URL for each
+ * company in a single request. For every URL Grok returns we call the
+ * Python DOM-scrape service, then OpenAI to pick the best email.
  */
 export async function discoverViaGrokBatch(
   inputs: Array<{ company: string; jobTitle?: string; jobUrl?: string }>
@@ -361,11 +370,11 @@ export async function discoverViaGrokBatch(
   if (deduped.length === 0) return out;
 
   const queries = deduped
-    .map((e) => `search the company URL for ${e.company}`)
+    .map((e) => `Find the "Contact us" page URL for "${e.company}".`)
     .join("\n");
   const userPrompt =
     `${queries}\n\n` +
-    `Return JSON: { "results": [{ "company", "url", "contact_url" }] }`;
+    `Return JSON: { "results": [{ "company", "contact_url", "url" }] }`;
 
   let res: Awaited<ReturnType<typeof callGrokJson<GrokBatchResult>>>;
   try {
@@ -433,11 +442,13 @@ export async function discoverViaGrokBatch(
     }
   }
 
-  // Scrape each company's URLs for emails.
+  // Scrape each company's URLs (Python + Playwright) and let OpenAI
+  // pick the email. Sequential per company so a single slow page can't
+  // monopolise the function budget.
   let matched = 0;
   for (const [inputKey, urls] of Array.from(urlsByCompany.entries())) {
     if (urls.length === 0) continue;
-    const emails = await scrapeEmailsFromUrls(urls);
+    const emails = await scrapeAndExtract(urls);
     const contacts = scoreGrokEmails(emails);
     if (contacts.length === 0) continue;
     const inputCompany = byCompany.get(inputKey)!.company;
@@ -481,52 +492,60 @@ function extractUrlsFromText(text: string): string[] {
 }
 
 /**
- * Per the user's spec: take the URL Grok returned, hit that page and the
- * same origin's `/contact` variant, regex-extract emails. No deep crawl
- * — that path used to fan out to 80+ requests per company and 504 the
- * Vercel function. Stops on the first usable email.
+ * Take the URL(s) Grok produced for a single company, send them to the
+ * Python `/api/py/scrape-contact` service (Playwright when available,
+ * `requests + BeautifulSoup` fallback), then ask OpenAI to pick the best
+ * outreach email out of the rendered DOM. This is the path the user
+ * specified: Grok → URL → Python DOM scrape → OpenAI extraction.
+ *
+ * Returns an ordered list of emails (best first). Empty array on any
+ * failure so the caller can fall through to mark-as-skipped.
  */
-async function scrapeEmailsFromUrls(urls: string[]): Promise<string[]> {
-  const ordered: string[] = [];
-  const seenEmails = new Set<string>();
-  const seenUrls = new Set<string>();
-
-  // Only the URL itself + same-origin `/contact` and `/contact-us`. Anything
-  // more makes the worst-case wall-time blow past the 60 s Vercel ceiling.
-  const candidates: string[] = [];
+async function scrapeAndExtract(urls: string[]): Promise<string[]> {
+  // Strip URLs pointing at blocked job-board / ATS domains; Grok sometimes
+  // cites these as the "contact page" and they're never useful.
+  const safe: string[] = [];
+  const seen = new Set<string>();
   for (const url of urls.slice(0, 3)) {
     try {
       assertAllowedUrl(url);
     } catch {
       continue;
     }
-    let origin: string;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    safe.push(url);
+    // Always tee up the same-origin `/contact` page too — many companies
+    // put their email there but Grok cites the homepage.
     try {
-      origin = new URL(url).origin;
-    } catch {
-      continue;
-    }
-    for (const candidate of [url, `${origin}/contact`, `${origin}/contact-us`]) {
-      if (seenUrls.has(candidate)) continue;
-      seenUrls.add(candidate);
-      candidates.push(candidate);
-    }
-  }
-
-  for (const candidate of candidates) {
-    try {
-      const html = await defaultFetch(candidate);
-      for (const email of extractEmailsFromText(html)) {
-        if (seenEmails.has(email)) continue;
-        seenEmails.add(email);
-        ordered.push(email);
+      const origin = new URL(url).origin;
+      const contact = `${origin}/contact`;
+      if (!seen.has(contact)) {
+        seen.add(contact);
+        safe.push(contact);
       }
-      if (ordered.length >= 2) break;
     } catch {
-      continue;
+      /* skip malformed URL */
     }
   }
-  return ordered;
+  if (safe.length === 0) return [];
+
+  let pages: ScrapedContactPage[];
+  try {
+    const result = await scrapeContactPages(safe);
+    pages = result.results;
+  } catch (e) {
+    await logEvent("warn", "scrapeContactPages failed", {
+      urlCount: safe.length,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return [];
+  }
+  if (pages.length === 0) return [];
+
+  // OpenAI does the final filter — picks the role-based contact, skips
+  // noreply / footer noise, handles obfuscated "info [at] foo dot com".
+  return extractEmailsFromPages(pages);
 }
 
 /**
