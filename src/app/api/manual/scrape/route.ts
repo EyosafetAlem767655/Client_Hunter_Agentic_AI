@@ -22,7 +22,10 @@ export async function POST(request: Request) {
     // Hobby's 60 s ceiling. The user can fire /api/manual/digest from
     // Settings whenever they want the email summary; the 06:00 UTC cron
     // also still sends it automatically.
-    const summary = await runScrapePipeline({ sendDigest: false });
+    const summary = await runScrapePipeline({
+      sendDigest: false,
+      filterLimit: 0,
+    });
     return NextResponse.json({ ok: true, ...summary });
   } catch (error) {
     // Return 200 with diagnostic info instead of 500 — the UI shows it.

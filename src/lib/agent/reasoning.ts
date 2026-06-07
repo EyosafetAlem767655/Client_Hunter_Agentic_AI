@@ -48,12 +48,27 @@ interface BatchOutcome {
   succeeded: number;
 }
 
-async function processBatch(postings: Posting[]): Promise<BatchOutcome> {
+interface FilterBatchOptions {
+  llmTimeoutMs?: number;
+  llmMaxRetries?: number;
+  throwOnLlmFailure?: boolean;
+}
+
+export interface FilterPendingOptions extends FilterBatchOptions {
+  maxBatches?: number;
+  concurrency?: number;
+}
+
+async function processBatch(
+  postings: Posting[],
+  options: FilterBatchOptions = {}
+): Promise<BatchOutcome> {
   const inputHash = sha256Hex(
     JSON.stringify(postings.map((p) => ({ id: p.id, title: p.title })))
   );
   const cached = await memory.getCachedLlm(env.OPENAI_FILTER_MODEL, inputHash);
   let parsed = cached ? parseFilteredBatch(cached) : null;
+  let llmFailed = false;
 
   if (!parsed) {
     try {
@@ -69,6 +84,8 @@ async function processBatch(postings: Posting[]): Promise<BatchOutcome> {
           }))
         ),
         jsonSchema: filteredJobJsonSchema as Record<string, unknown>,
+        timeoutMs: options.llmTimeoutMs,
+        maxRetries: options.llmMaxRetries,
       });
       parsed = parseFilteredBatch(raw);
       if (parsed) {
@@ -79,11 +96,19 @@ async function processBatch(postings: Posting[]): Promise<BatchOutcome> {
         );
       }
     } catch (error) {
+      llmFailed = true;
       await logEvent("error", "LLM filter call failed", {
         error: error instanceof Error ? error.message : String(error),
         batchSize: postings.length,
       });
+      if (options.throwOnLlmFailure) {
+        throw error;
+      }
     }
+  }
+
+  if (!parsed && llmFailed) {
+    return { newMatches: [], processed: 0, succeeded: 0 };
   }
 
   const newMatches: NewMatch[] = [];
@@ -156,7 +181,8 @@ export async function withConcurrency<T, R>(
 }
 
 export async function filterPendingPostings(
-  limit: number
+  limit: number,
+  options: FilterPendingOptions = {}
 ): Promise<FilterRunResult> {
   const pending = await memory.listUnfilteredPostings(limit);
 
@@ -164,11 +190,15 @@ export async function filterPendingPostings(
   for (let i = 0; i < pending.length; i += FILTER_BATCH_SIZE) {
     batches.push(pending.slice(i, i + FILTER_BATCH_SIZE).map((b) => b.posting));
   }
+  const selectedBatches =
+    options.maxBatches && options.maxBatches > 0
+      ? batches.slice(0, options.maxBatches)
+      : batches;
 
   const outcomes = await withConcurrency(
-    batches,
-    LLM_FILTER_CONCURRENCY,
-    processBatch
+    selectedBatches,
+    options.concurrency ?? LLM_FILTER_CONCURRENCY,
+    (batch) => processBatch(batch, options)
   );
 
   let processed = 0;

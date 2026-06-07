@@ -14,11 +14,15 @@ export async function callOpenAIJson<T>(params: {
   system: string;
   user: string;
   jsonSchema: Record<string, unknown>;
+  timeoutMs?: number;
+  maxRetries?: number;
 }): Promise<T> {
   const client = createOpenAIClient();
   let lastError: Error | null = null;
+  const maxRetries = params.maxRetries ?? MAX_RETRIES;
+  const timeoutMs = params.timeoutMs ?? TIMEOUT_MS;
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const completion = await withTimeout(
         client.chat.completions.create({
@@ -36,7 +40,7 @@ export async function callOpenAIJson<T>(params: {
             },
           },
         }),
-        TIMEOUT_MS,
+        timeoutMs,
         "OpenAI request"
       );
 
@@ -47,7 +51,7 @@ export async function callOpenAIJson<T>(params: {
       return JSON.parse(content) as T;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      if (attempt < MAX_RETRIES - 1) {
+      if (attempt < maxRetries - 1) {
         await sleep(2 ** attempt * 500);
       }
     }

@@ -159,7 +159,7 @@ export function SettingsClient({
     } catch {
       // ignore parse error
     }
-    if (!res.ok) {
+    if (!res.ok || data?.ok === false) {
       return {
         ok: false,
         data,
@@ -167,6 +167,53 @@ export function SettingsClient({
       };
     }
     return { ok: true, data };
+  }
+
+  async function runFilterLoop(): Promise<{
+    processed: number;
+    succeeded: number;
+    relevant: number;
+    steps: number;
+  }> {
+    let processed = 0;
+    let succeeded = 0;
+    let relevant = 0;
+    let steps = 0;
+
+    setLoading("Filter");
+    for (let i = 0; i < 30; i++) {
+      const result = await runOne("/api/manual/filter/next?n=12", "Filter");
+      if (!result.ok) {
+        throw new Error(result.error ?? "Filter failed");
+      }
+
+      const step = result.data.step as
+        | {
+            processed?: number;
+            succeeded?: number;
+            newMatches?: unknown[];
+          }
+        | undefined;
+      const stepProcessed = step?.processed ?? 0;
+      const stepSucceeded = step?.succeeded ?? 0;
+      const stepRelevant = Array.isArray(step?.newMatches)
+        ? step.newMatches.length
+        : 0;
+
+      if (stepProcessed === 0 || result.data.done === true) break;
+
+      processed += stepProcessed;
+      succeeded += stepSucceeded;
+      relevant += stepRelevant;
+      steps++;
+
+      showToast(
+        "ok",
+        `Filter progress: ${processed} checked, ${relevant} relevant`
+      );
+    }
+
+    return { processed, succeeded, relevant, steps };
   }
 
   async function runManual(
@@ -628,15 +675,14 @@ export function SettingsClient({
             <div className="grid gap-3 sm:grid-cols-2">
               <ActionTile
                 title="Run scrape + filter"
-                description="Scrapes job boards and runs the OpenAI filter. When it returns, a 60-second countdown starts and the 1-by-1 contact loop kicks off automatically. You can cancel the countdown if you want to do something else first."
+                description="Scrapes job boards, then runs the OpenAI relevance filter in small batches. When filtering returns, a 60-second countdown starts and the 1-by-1 contact loop kicks off automatically."
                 disabled={loading !== null || scrapeCountdown !== null}
-                loading={loading === "Scrape"}
+                loading={loading === "Scrape" || loading === "Filter"}
                 onClick={() =>
                   runManual("/api/manual/scrape", "Scrape", {
                     after: async (data) => {
-                      const relevant =
-                        (data?.stats as { relevant?: number } | undefined)
-                          ?.relevant ?? null;
+                      showToast("ok", "Jobs scraped - filtering relevance now");
+                      const filter = await runFilterLoop();
                       // Refresh the discovery progress so the bar shows
                       // the new pending count immediately.
                       try {
@@ -666,12 +712,14 @@ export function SettingsClient({
                       }
                       showToast(
                         "ok",
-                        `Scrape done${
-                          relevant !== null
-                            ? ` · ${relevant} relevant`
-                            : ""
-                        } — auto-discovery in 60 s`
+                        `Scrape + filter done - ${filter.relevant} relevant - auto-discovery in 60 s`
                       );
+                      setLastRun({
+                        label: "Scrape + filter",
+                        ok: true,
+                        data: { scrape: data, filter },
+                        at: Date.now(),
+                      });
                       // Don't block the response — fire and forget.
                       void scheduleEmailLoopAfterScrape();
                     },

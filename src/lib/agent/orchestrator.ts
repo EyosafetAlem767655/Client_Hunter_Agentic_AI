@@ -38,6 +38,12 @@ export interface ScrapePipelineOptions {
    * out automatically once a day.
    */
   sendDigest?: boolean;
+  /**
+   * Set to 0 for manual scrape calls that should only ingest postings.
+   * The Settings UI then runs LLM filtering in small follow-up requests.
+   */
+  filterLimit?: number;
+  filterMaxBatches?: number;
 }
 
 export async function runScrapePipeline(
@@ -97,7 +103,17 @@ export async function runScrapePipelineFromPostings(
     const deadlineMs = start + 55_000;
     const timeLeft = () => deadlineMs - Date.now();
 
-    const filter = await filterPendingPostings(CRON_POSTING_LIMIT);
+    const shouldFilter = options.filterLimit !== 0;
+    const filter = shouldFilter
+      ? await filterPendingPostings(
+          options.filterLimit ?? CRON_POSTING_LIMIT,
+          {
+            maxBatches: options.filterMaxBatches ?? 2,
+            llmTimeoutMs: 15_000,
+            llmMaxRetries: 1,
+          }
+        )
+      : { processed: 0, succeeded: 0, newMatches: [] };
     processed += filter.processed;
     succeeded += filter.succeeded;
 

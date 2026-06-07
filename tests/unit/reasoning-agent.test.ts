@@ -55,4 +55,20 @@ describe("reasoning agent", () => {
     expect(result.newMatches[0].postingId).toBe(1);
     expect(result.newMatches[0].score).toBe(90);
   }, 15_000);
+
+  it("leaves postings unfiltered when the LLM filter call fails", async () => {
+    const { callOpenAIJson } = await import("@/lib/llm/client");
+    const { memory } = await import("@/lib/agent/memory");
+    vi.mocked(callOpenAIJson).mockRejectedValueOnce(new Error("timeout"));
+
+    const { filterPendingPostings } = await import("@/lib/agent/reasoning");
+    const result = await filterPendingPostings(5, {
+      llmMaxRetries: 1,
+      llmTimeoutMs: 1_000,
+    });
+
+    expect(result.processed).toBe(0);
+    expect(result.succeeded).toBe(0);
+    expect(memory.insertFilteredJob).not.toHaveBeenCalled();
+  }, 15_000);
 });
