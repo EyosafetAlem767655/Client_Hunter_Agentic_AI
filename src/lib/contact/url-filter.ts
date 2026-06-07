@@ -20,14 +20,25 @@ const SCHEMA = {
   required: ["urls"],
 } as const;
 
-const SYSTEM_PROMPT = `You choose official company contact-page URLs from search results.
+const SYSTEM_PROMPT = `You are picking the URL(s) most likely to surface a \
+contact email for a given company. Be liberal — when in doubt, KEEP a \
+candidate rather than throw it away. You have freedom to use your own \
+judgement.
 
-Rules:
-- Return only URLs from the provided candidates.
-- Prefer the company's official contact/contact-us page.
-- Reject wrong-company lookalikes, job boards, ATS pages, directories, and unrelated companies.
-- If only a homepage is credible, include it after contact-like pages.
-- Return at most three URLs.`;
+Strong signals to keep a URL:
+- The host is (or looks like) the company's own domain.
+- The path ends with /contact, /contact-us, /contacts, /apply, /careers, \
+/jobs, /about, /about-us, /team, /support, /press, or a similar contact / \
+careers-style path.
+- The page title or snippet mentions reaching out, hiring, careers, or \
+emailing the company.
+
+Reject only when a URL clearly belongs to a different company than the \
+one being searched. Job boards, ATS pages, and directories should be a \
+last resort but are still OK to return if nothing better exists.
+
+Return only URLs that appeared verbatim in the candidates. Return up to \
+three URLs, best first.`;
 
 const BLOCKED_HOST_PARTS = [
   "linkedin.com",
@@ -48,7 +59,7 @@ export async function filterContactUrls(
 
   try {
     const result = await callOpenAIJson<UrlFilterResult>({
-      model: env.OPENAI_FILTER_MODEL,
+      model: env.OPENAI_URL_FILTER_MODEL,
       system: SYSTEM_PROMPT,
       user: buildUserPrompt(company, candidates),
       jsonSchema: SCHEMA as unknown as Record<string, unknown>,
@@ -157,9 +168,16 @@ function scoreCandidate(
 
   let score = 0;
   if (path.includes("contact")) score += 80;
+  if (path.includes("apply")) score += 70;
+  if (path.includes("careers") || path.includes("career")) score += 50;
+  if (path.includes("/jobs") || path.endsWith("/jobs")) score += 40;
   if (path.includes("about")) score += 20;
+  if (path.includes("team") || path.includes("support")) score += 15;
   if (path === "/" || path === "") score += 5;
-  if (hostname.startsWith("jobs.")) score -= 35;
+  // `jobs.` subdomain on the company's own domain often hosts the ATS;
+  // mildly downgrade but don't bury — sometimes it's the only page that
+  // exposes a careers email.
+  if (hostname.startsWith("jobs.")) score -= 10;
   if (BLOCKED_HOST_PARTS.some((blocked) => hostname.includes(blocked))) {
     score -= 100;
   }

@@ -22,6 +22,18 @@ export function normalizeEnv(
     source.OPENAI_DRAFT_MODEL = "gpt-4o";
   }
 
+  // Contact-discovery LLM defaults — URL pick + email extraction. These
+  // are separate from OPENAI_FILTER_MODEL (which handles the bulk job
+  // relevance pass on every scraped posting) because contact discovery
+  // needs sharper reasoning than gpt-4o-mini for the same tokens.
+  if (!source.OPENAI_URL_FILTER_MODEL) {
+    source.OPENAI_URL_FILTER_MODEL = "gpt-5.5";
+  }
+
+  if (!source.OPENAI_EMAIL_EXTRACT_MODEL) {
+    source.OPENAI_EMAIL_EXTRACT_MODEL = "gpt-5.5";
+  }
+
   if (!source.DRY_RUN) {
     source.DRY_RUN = "true";
   }
@@ -49,6 +61,8 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().min(1),
   OPENAI_FILTER_MODEL: z.string().default("gpt-4o-mini"),
   OPENAI_DRAFT_MODEL: z.string().default("gpt-4o"),
+  OPENAI_URL_FILTER_MODEL: z.string().default("gpt-5.5"),
+  OPENAI_EMAIL_EXTRACT_MODEL: z.string().default("gpt-5.5"),
   GMAIL_USER: z.string().email(),
   GMAIL_APP_PASSWORD: z.string().min(16),
   CRON_SECRET: z.string().min(8),

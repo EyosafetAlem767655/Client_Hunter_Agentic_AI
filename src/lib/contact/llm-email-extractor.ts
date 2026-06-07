@@ -11,9 +11,9 @@ interface ExtractedEmails {
 }
 
 const SYSTEM_PROMPT = `You extract business contact emails from scraped \
-contact pages. Given a company's contact page text and any mailto: links \
-found on the page, return the single best email to use for cold outreach \
-plus a small list of alternates.
+contact pages. Given a company's contact page text, the DOM elements that \
+mention "@", and any mailto: links, return the single best email to use \
+for cold outreach plus a small list of alternates.
 
 Rules:
 - Prefer role-based addresses (careers@, jobs@, hiring@, hr@, recruiting@, \
@@ -40,6 +40,30 @@ const SCHEMA = {
   },
   required: ["primary", "alternates"],
 } as const;
+
+/**
+ * Cheap pre-filter on the `@` indicator. If no scraped page contains an
+ * `@` in its text, mailtos, or DOM elements, there's no point spending
+ * tokens on the LLM — the discovery flow will fall through to a
+ * `url_only` contact. Returns the pages worth sending to the LLM.
+ */
+function pagesWithEmailMarkers(
+  pages: ScrapedContactPage[]
+): ScrapedContactPage[] {
+  return pages.filter((page) => pageHasEmailMarker(page));
+}
+
+function pageHasEmailMarker(page: ScrapedContactPage): boolean {
+  if (page.mailtos && page.mailtos.length > 0) return true;
+  if ((page.text ?? "").includes("@")) return true;
+  if (Array.isArray(page.elements)) {
+    for (const element of page.elements) {
+      if ((element.text ?? "").includes("@")) return true;
+      if (JSON.stringify(element.attributes ?? {}).includes("@")) return true;
+    }
+  }
+  return false;
+}
 
 function buildUserPrompt(pages: ScrapedContactPage[]): string {
   const blocks = pages.map((p, i) => {
@@ -75,34 +99,46 @@ function selectEmailRelevantElements(
   page: ScrapedContactPage
 ): Array<{ tag: string; attributes: Record<string, unknown>; text: string }> {
   const elements = Array.isArray(page.elements) ? page.elements : [];
-  return elements
-    .filter((element) => {
-      const attrs = JSON.stringify(element.attributes ?? {}).toLowerCase();
-      const text = (element.text ?? "").toLowerCase();
-      const haystack = `${attrs} ${text}`;
-      return (
-        haystack.includes("@") ||
-        haystack.includes("mailto:") ||
-        haystack.includes("email") ||
-        haystack.includes("contact") ||
-        haystack.includes("career") ||
-        haystack.includes("hiring") ||
-        haystack.includes("recruit") ||
-        haystack.includes("talent")
-      );
-    })
+  // Score elements: anything containing `@` or `mailto:` is the strongest
+  // signal — those are the actual email candidates. Keyword-only matches
+  // (careers/hiring/contact text) come second. This keeps the most useful
+  // 120 elements in the LLM context window when the page is large.
+  const scored = elements.map((element, index) => {
+    const attrs = JSON.stringify(element.attributes ?? {}).toLowerCase();
+    const text = (element.text ?? "").toLowerCase();
+    const haystack = `${attrs} ${text}`;
+    let score = 0;
+    if (haystack.includes("@")) score += 100;
+    if (haystack.includes("mailto:")) score += 90;
+    if (haystack.includes("email")) score += 20;
+    if (haystack.includes("contact")) score += 15;
+    if (
+      haystack.includes("career") ||
+      haystack.includes("hiring") ||
+      haystack.includes("recruit") ||
+      haystack.includes("talent")
+    ) {
+      score += 10;
+    }
+    return { element, score, index };
+  });
+  return scored
+    .filter((row) => row.score > 0)
+    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
     .slice(0, 120)
-    .map((element) => ({
-      tag: element.tag,
-      attributes: element.attributes ?? {},
-      text: (element.text ?? "").slice(0, 500),
+    .map((row) => ({
+      tag: row.element.tag,
+      attributes: row.element.attributes ?? {},
+      text: (row.element.text ?? "").slice(0, 500),
     }));
 }
 
 /**
  * Send the scraped contact-page content to OpenAI and let the model pick
  * the right business contact email. Returns primary first, then the
- * model's alternates. Empty list on parse / API failure.
+ * model's alternates. Empty list on parse / API failure, OR when no page
+ * contained an `@` indicator (skip the LLM entirely — the caller will
+ * fall through to a `url_only` contact).
  */
 export async function extractEmailsFromPages(
   pages: ScrapedContactPage[]
@@ -110,17 +146,28 @@ export async function extractEmailsFromPages(
   const usable = pages.filter((p) => p.ok && (p.text || p.mailtos.length));
   if (usable.length === 0) return [];
 
+  // Short-circuit: if no scraped data contains an `@`, the LLM cannot
+  // hallucinate a real email from nothing. Save the token cost and let
+  // the caller record a url_only contact instead.
+  const withMarkers = pagesWithEmailMarkers(usable);
+  if (withMarkers.length === 0) {
+    await logEvent("info", "Email extractor skipped — no @ found", {
+      pageCount: usable.length,
+    });
+    return [];
+  }
+
   let result: ExtractedEmails;
   try {
     result = await callOpenAIJson<ExtractedEmails>({
-      model: env.OPENAI_FILTER_MODEL,
+      model: env.OPENAI_EMAIL_EXTRACT_MODEL,
       system: SYSTEM_PROMPT,
-      user: buildUserPrompt(usable),
+      user: buildUserPrompt(withMarkers),
       jsonSchema: SCHEMA as unknown as Record<string, unknown>,
     });
   } catch (e) {
     await logEvent("warn", "LLM email extractor failed", {
-      pageCount: usable.length,
+      pageCount: withMarkers.length,
       error: e instanceof Error ? e.message : String(e),
     });
     return [];
