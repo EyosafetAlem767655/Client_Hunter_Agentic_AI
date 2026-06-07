@@ -1,6 +1,6 @@
 """POST /api/py/scrape_contact
 
-Take a list of URLs (typically `/contact` pages Grok found for a company),
+Take a list of URLs (typically `/contact` pages found for a company),
 load each one, and return everything a downstream LLM needs to pick out
 the right outreach email:
 
@@ -9,7 +9,7 @@ the right outreach email:
   - a flag telling the caller whether we used Playwright (JS-rendered DOM)
     or fell back to plain `requests` (server-side HTML only)
 
-The caller (Next.js `discoverViaGrokBatch`) hands the bundle to OpenAI,
+The caller hands the bundle to OpenAI,
 which extracts the best email. No regex parsing happens here.
 
 Playwright is preferred — many marketing sites JS-render their contact
@@ -40,6 +40,35 @@ BROWSER_UA = (
 # company → at most ~3 candidate URLs, so 8 s × 3 ≈ 24 s, well inside the
 # Vercel 60 s function ceiling.
 PER_PAGE_TIMEOUT_MS = 8_000
+MAX_DOM_ELEMENTS = 700
+MAX_ELEMENT_TEXT = 500
+MAX_ATTR_VALUE = 300
+
+
+def _compact_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key, value in attrs.items():
+        if isinstance(value, list):
+            compact[key] = [str(v)[:MAX_ATTR_VALUE] for v in value[:10]]
+        else:
+            compact[key] = str(value)[:MAX_ATTR_VALUE]
+    return compact
+
+
+def _structured_elements(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    elements: list[dict[str, Any]] = []
+    for element in soup.find_all(True):
+        text = element.get_text(" ", strip=True)
+        elements.append(
+            {
+                "tag": element.name,
+                "attributes": _compact_attrs(element.attrs),
+                "text": text[:MAX_ELEMENT_TEXT],
+            }
+        )
+        if len(elements) >= MAX_DOM_ELEMENTS:
+            break
+    return elements
 
 
 def _authorized(headers) -> bool:
@@ -90,6 +119,7 @@ def _extract_with_requests(url: str) -> dict[str, Any]:
         bad.decompose()
 
     text = soup.get_text(" ", strip=True)
+    elements = _structured_elements(soup)
 
     mailtos: list[str] = []
     for anchor in soup.find_all("a", href=True):
@@ -101,6 +131,7 @@ def _extract_with_requests(url: str) -> dict[str, Any]:
         "url": url,
         "text": text[:20_000],  # OpenAI context cap
         "mailtos": list(dict.fromkeys(mailtos))[:50],
+        "elements": elements,
         "engine": "requests",
         "ok": True,
     }
@@ -124,6 +155,11 @@ def _extract_with_playwright(sync_playwright, url: str) -> dict[str, Any]:
                 timeout=PER_PAGE_TIMEOUT_MS,
             )
             text = page.evaluate("() => document.body.innerText") or ""
+            html = page.content()
+            soup = BeautifulSoup(html, "lxml")
+            for bad in soup(["script", "style", "noscript"]):
+                bad.decompose()
+            elements = _structured_elements(soup)
             anchors: list[str] = page.evaluate(
                 """
                 () => Array.from(document.querySelectorAll('a[href]'))
@@ -141,6 +177,7 @@ def _extract_with_playwright(sync_playwright, url: str) -> dict[str, Any]:
                 "url": url,
                 "text": text[:20_000],
                 "mailtos": list(dict.fromkeys(mailtos))[:50],
+                "elements": elements,
                 "engine": "playwright",
                 "ok": True,
             }
@@ -165,6 +202,7 @@ def scrape_one(url: str, sync_playwright) -> dict[str, Any]:
                     "url": url,
                     "text": "",
                     "mailtos": [],
+                    "elements": [],
                     "engine": "none",
                     "ok": False,
                     "error": f"playwright: {exc}; requests: {inner}"[:300],
@@ -176,6 +214,7 @@ def scrape_one(url: str, sync_playwright) -> dict[str, Any]:
             "url": url,
             "text": "",
             "mailtos": [],
+            "elements": [],
             "engine": "requests",
             "ok": False,
             "error": str(exc)[:300],

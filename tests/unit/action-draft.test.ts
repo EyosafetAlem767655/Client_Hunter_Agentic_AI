@@ -21,17 +21,17 @@ vi.mock("@/lib/agent/observability", () => ({
 
 vi.mock("@/lib/contact/discovery", () => ({
   discoverContactsForPosting: vi.fn().mockResolvedValue([
-    { email: "hr@acme.com", sourceType: "listed", confidence: 0.9 },
+    {
+      email: "hr@acme.com",
+      contactUrl: "https://acme.com/contact",
+      sourceType: "langsearch_scraped",
+      confidence: 0.9,
+    },
   ]),
   discoverFromBody: vi.fn().mockReturnValue([
-    { email: "hr@acme.com", sourceType: "listed", confidence: 0.9 },
+    { email: "hr@acme.com", contactUrl: null, sourceType: "listed", confidence: 0.9 },
   ]),
-  discoverViaGrokBatch: vi.fn().mockResolvedValue(new Map()),
   pickBestContact: vi.fn((c: unknown[]) => c[0]),
-}));
-
-vi.mock("@/lib/llm/grok", () => ({
-  isGrokConfigured: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("@/lib/agent/memory", () => ({
@@ -61,6 +61,22 @@ vi.mock("@/lib/agent/memory", () => ({
           roleCategory: "engineering",
         },
       },
+      {
+        contact: {
+          id: 2,
+          email: null,
+          contactUrl: "https://ghost.example/contact",
+        },
+        posting: {
+          id: 2,
+          title: "Engineer",
+          company: "Ghost",
+        },
+        filtered: {
+          fitReason: "Strong fit",
+          roleCategory: "engineering",
+        },
+      },
     ]),
     getCachedLlm: vi.fn().mockResolvedValue(null),
     setCachedLlm: vi.fn().mockResolvedValue(undefined),
@@ -75,6 +91,21 @@ vi.mock("@/lib/agent/memory", () => ({
         },
         contact: { id: 1, email: "hr@acme.com", confidence: "0.9" },
         posting: { id: 1 },
+      },
+      {
+        email: {
+          id: 2,
+          subject: "URL only should fail",
+          body: "x".repeat(150),
+          status: "pending",
+        },
+        contact: {
+          id: 2,
+          email: null,
+          contactUrl: "https://ghost.example/contact",
+          confidence: "0.4",
+        },
+        posting: { id: 2 },
       },
     ]),
     updateOutreachStatus: vi.fn().mockResolvedValue(undefined),
@@ -104,6 +135,7 @@ describe("action draft and send", () => {
     const { sendEmail } = await import("@/lib/email/transport");
     const result = await sendApprovedEmails(5, true, true);
     expect(result.sent).toBe(1);
+    expect(result.failed).toBe(1);
     expect(sendEmail).toHaveBeenCalled();
   });
 
@@ -115,7 +147,7 @@ describe("action draft and send", () => {
     });
     const { sendApprovedEmails } = await import("@/lib/agent/action");
     const result = await sendApprovedEmails(5, true, true);
-    expect(result.failed).toBe(1);
+    expect(result.failed).toBe(2);
     expect(result.sent).toBe(0);
   });
 });

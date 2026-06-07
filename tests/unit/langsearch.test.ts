@@ -1,81 +1,109 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const ORIGINAL = process.env.LANGSEARCH_API_KEY;
+const ORIGINAL_KEY = process.env.LANGSEARCH_API_KEY;
 
 afterEach(() => {
-  if (ORIGINAL === undefined) {
+  if (ORIGINAL_KEY === undefined) {
     delete process.env.LANGSEARCH_API_KEY;
   } else {
-    process.env.LANGSEARCH_API_KEY = ORIGINAL;
+    process.env.LANGSEARCH_API_KEY = ORIGINAL_KEY;
   }
   vi.restoreAllMocks();
 });
 
-describe("findCompanyEmails (LangSearch client)", () => {
+describe("LangSearch contact URL client", () => {
   beforeEach(() => {
-    process.env.LANGSEARCH_API_KEY = "lk-test";
+    process.env.LANGSEARCH_API_KEY = "sk-langsearch-test";
+    process.env.CRON_SECRET = "test-cron-secret";
+    process.env.NEXT_PUBLIC_APP_URL = "https://app.example";
     vi.resetModules();
   });
 
-  it("returns the emails array from a happy-path response", async () => {
+  it("parses nested data.webPages.value results", async () => {
+    const { parseLangSearchWebResults } = await import("@/lib/langsearch/client");
+    const out = parseLangSearchWebResults({
+      data: {
+        webPages: {
+          value: [
+            {
+              name: "CRAE GROUP LTD Contact",
+              url: "https://www.craegroup.com/contact",
+              displayUrl: "https://www.craegroup.com/contact",
+              snippet: "Contact CRAE GROUP LTD",
+              summary: "Contact page for CRAE GROUP LTD.",
+            },
+            {
+              name: "Wrong Company",
+              url: "https://www.cra-group.example/contact",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(out).toEqual([
+      {
+        title: "CRAE GROUP LTD Contact",
+        url: "https://www.craegroup.com/contact",
+        displayUrl: "https://www.craegroup.com/contact",
+        snippet: "Contact CRAE GROUP LTD",
+        summary: "Contact page for CRAE GROUP LTD.",
+      },
+      {
+        title: "Wrong Company",
+        url: "https://www.cra-group.example/contact",
+        displayUrl: "https://www.cra-group.example/contact",
+        snippet: "",
+        summary: "",
+      },
+    ]);
+  });
+
+  it("calls the Python LangSearch route and returns normalized URL results", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({
-        emails: ["careers@acme.com", "Hello@Acme.com"],
+        results: [
+          {
+            title: "Contact",
+            url: "https://www.craegroup.com/contact",
+            displayUrl: "craegroup.com/contact",
+            snippet: "Contact us",
+            summary: "Email and enquiry details.",
+          },
+        ],
       }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const { findCompanyEmails } = await import("@/lib/langsearch/client");
-    const out = await findCompanyEmails("Acme", "acme.com");
+    const { findContactUrls } = await import("@/lib/langsearch/client");
+    const out = await findContactUrls("CRAE GROUP LTD");
 
-    expect(out).toContain("careers@acme.com");
-    expect(out).toContain("hello@acme.com"); // lowercased
+    expect(out[0]?.url).toBe("https://www.craegroup.com/contact");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const url = fetchMock.mock.calls[0][0] as string;
-    expect(url).toContain("company=Acme");
-    expect(url).toContain("domain=acme.com");
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://app.example/api/py/langsearch_urls"
+    );
     const init = fetchMock.mock.calls[0][1] as RequestInit;
-    expect((init.headers as Record<string, string>).Authorization).toBe(
-      "Bearer lk-test"
-    );
+    expect(init.method).toBe("POST");
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer test-cron-secret",
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(init.body as string)).toEqual({
+      company: "CRAE GROUP LTD",
+      count: 5,
+    });
   });
 
-  it("also accepts a results: [{email}] payload shape", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          results: [{ email: "hr@widget.io" }, { email: "support@widget.io" }],
-        }),
-      })
-    );
-    const { findCompanyEmails } = await import("@/lib/langsearch/client");
-    const out = await findCompanyEmails("Widget");
-    expect(out).toEqual(
-      expect.arrayContaining(["hr@widget.io", "support@widget.io"])
-    );
-  });
+  it("returns [] on non-2xx and network errors", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+    const { findContactUrls } = await import("@/lib/langsearch/client");
+    expect(await findContactUrls("Acme")).toEqual([]);
 
-  it("returns [] on non-2xx", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: false, status: 500 })
-    );
-    const { findCompanyEmails } = await import("@/lib/langsearch/client");
-    expect(await findCompanyEmails("X")).toEqual([]);
-  });
-
-  it("returns [] on network error", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockRejectedValue(new Error("boom"))
-    );
-    const { findCompanyEmails } = await import("@/lib/langsearch/client");
-    expect(await findCompanyEmails("X")).toEqual([]);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("boom")));
+    expect(await findContactUrls("Acme")).toEqual([]);
   });
 
   it("returns [] when LANGSEARCH_API_KEY is missing", async () => {
@@ -83,14 +111,15 @@ describe("findCompanyEmails (LangSearch client)", () => {
     vi.resetModules();
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const { findCompanyEmails } = await import("@/lib/langsearch/client");
-    expect(await findCompanyEmails("X")).toEqual([]);
+
+    const { findContactUrls } = await import("@/lib/langsearch/client");
+    expect(await findContactUrls("Acme")).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("returns [] for empty/too-short company name", async () => {
-    const { findCompanyEmails } = await import("@/lib/langsearch/client");
-    expect(await findCompanyEmails("")).toEqual([]);
-    expect(await findCompanyEmails("A")).toEqual([]);
+  it("returns [] for empty or too-short company names", async () => {
+    const { findContactUrls } = await import("@/lib/langsearch/client");
+    expect(await findContactUrls("")).toEqual([]);
+    expect(await findContactUrls("A")).toEqual([]);
   });
 });

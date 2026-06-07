@@ -60,7 +60,12 @@ export function SettingsClient({
   } | null>(null);
   const [discoveryActive, setDiscoveryActive] = useState(false);
   const [discoveryLog, setDiscoveryLog] = useState<
-    Array<{ company: string; email: string | null; method: string | null }>
+    Array<{
+      company: string;
+      email: string | null;
+      contactUrl?: string | null;
+      method: string | null;
+    }>
   >([]);
   // Use a ref so the loop can be cancelled mid-flight.
   const stopDiscoveryRef = useState<{ current: boolean }>({ current: false })[0];
@@ -211,8 +216,8 @@ export function SettingsClient({
         return;
       }
 
-      // Step 2: chained follow-up (e.g. scrape → outreach). Vercel Hobby
-      // caps each function at 60 s, so the heavy Grok-discovery + draft +
+      // Step 2: chained follow-up (e.g. scrape -> outreach). Vercel Hobby
+      // caps each function at 60 s, so the heavy contact discovery + draft +
       // send work runs as its OWN HTTP call. The UI fires it the moment
       // the scrape returns so the user gets the full end-to-end behaviour
       // without busting the timeout.
@@ -250,7 +255,7 @@ export function SettingsClient({
    * Drives the 1-by-1 discovery loop. Each iteration:
    *   1. POSTs /api/manual/discover/next?n=1
    *   2. updates the progress bar + recent-finds log
-   *   3. rests ~1.2 s so Grok has breathing room
+   *   3. rests briefly before the next company
    * Stops when progress.pending hits 0, when the stop button is pressed,
    * or after too many consecutive failures.
    */
@@ -278,6 +283,7 @@ export function SettingsClient({
             results: Array<{
               company: string;
               email: string | null;
+              contactUrl?: string | null;
               method: string | null;
             }>;
           };
@@ -326,9 +332,8 @@ export function SettingsClient({
           showToast("ok", "All companies processed");
           break;
         }
-        // 30 s rest between Grok calls per the requested spec — gives
-        // xAI breathing room and keeps each cycle obviously within
-        // the Vercel function budget.
+        // Short rest between companies keeps each cycle inside the Vercel
+        // function budget and avoids hammering external APIs.
         await new Promise((r) => setTimeout(r, 30_000));
       }
     } finally {
@@ -460,8 +465,8 @@ export function SettingsClient({
                 Auto-starting email discovery in {scrapeCountdown}s
               </div>
               <div className="text-xs text-amber-800/80">
-                Lets the LLM filter commits settle before Grok looks up the
-                relevant companies, one at a time.
+                Lets the LLM filter commits settle before LangSearch/OpenAI
+                contact discovery starts, one company at a time.
               </div>
             </div>
           </div>
@@ -513,9 +518,9 @@ export function SettingsClient({
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             Walks through every relevant job that still needs a contact and
-            asks Grok (model{" "}
-            <code className="rounded bg-muted px-1 font-mono">grok-4.3</code>
-            ) for the company&apos;s contact page — one at a time, with a{" "}
+            uses LangSearch to retrieve likely contact URLs, then OpenAI
+            filters URLs and extracts emails from scraped contact pages
+            one company at a time, with a{" "}
             <strong>30-second rest</strong> between calls. Each request
             finishes well under 60 s so it never trips the Vercel Hobby
             timeout. <strong>Runs automatically 60 s after a scrape;</strong>{" "}
@@ -527,15 +532,15 @@ export function SettingsClient({
             const attempted = discoveryProgress?.attempted ?? 0;
             const skipped = discoveryProgress?.skipped ?? 0;
             const pending = discoveryProgress?.pending ?? 0;
-            // The bar tracks "attempted" so it advances when companies are
-            // skipped — otherwise it would stall on every unfindable one.
+            // The bar tracks "attempted" so it advances when companies only
+            // produce a review URL instead of an email.
             const pct = total > 0 ? Math.min(100, Math.round((attempted / total) * 100)) : 0;
             return (
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>
-                    {found.toLocaleString()} found ·{" "}
-                    {skipped.toLocaleString()} no match · {pending.toLocaleString()} pending
+                    {found.toLocaleString()} attempted ·{" "}
+                    {skipped.toLocaleString()} legacy skipped · {pending.toLocaleString()} pending
                     {" · "}of {total.toLocaleString()} relevant
                   </span>
                   <span className="font-mono">{pct}%</span>
@@ -591,13 +596,14 @@ export function SettingsClient({
                     )}
                   </a>
                   <span
+                    title={row.email ?? row.contactUrl ?? "no match"}
                     className={
                       row.email
-                        ? "rounded bg-amber-200 px-2 py-0.5 text-amber-900"
-                        : "text-muted-foreground"
+                        ? "max-w-[18rem] truncate rounded bg-amber-200 px-2 py-0.5 text-amber-900"
+                        : "max-w-[18rem] truncate text-muted-foreground"
                     }
                   >
-                    {row.email ?? "no match"}
+                    {row.email ?? row.contactUrl ?? "no match"}
                   </span>
                 </div>
               ))}
@@ -622,7 +628,7 @@ export function SettingsClient({
             <div className="grid gap-3 sm:grid-cols-2">
               <ActionTile
                 title="Run scrape + filter"
-                description="Scrapes job boards and runs the OpenAI filter. When it returns, a 60-second countdown starts and the 1-by-1 email loop kicks off automatically (30-second rest between Grok calls). You can cancel the countdown if you want to do something else first."
+                description="Scrapes job boards and runs the OpenAI filter. When it returns, a 60-second countdown starts and the 1-by-1 contact loop kicks off automatically. You can cancel the countdown if you want to do something else first."
                 disabled={loading !== null || scrapeCountdown !== null}
                 loading={loading === "Scrape"}
                 onClick={() =>

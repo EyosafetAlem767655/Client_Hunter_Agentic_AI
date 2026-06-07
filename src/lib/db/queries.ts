@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   gte,
+  isNotNull,
   inArray,
   isNull,
   lt,
@@ -128,7 +129,7 @@ export async function listTopRelevantWithoutContacts(limit: number) {
 }
 
 /**
- * Snapshot of where the "1-by-1" Grok discovery loop is. Used by the UI
+ * Snapshot of where the 1-by-1 contact discovery loop is. Used by the UI
  * progress bar and by the next-step endpoint to know when to stop.
  */
 export async function getDiscoveryProgress(): Promise<{
@@ -183,16 +184,21 @@ export async function getDiscoveryProgress(): Promise<{
 
 export async function upsertContact(data: {
   postingId: number;
-  email: string;
+  email?: string | null;
+  contactUrl?: string | null;
   sourceType: string;
   confidence: string;
 }) {
+  if (!data.email && !data.contactUrl) {
+    throw new Error("upsertContact requires email or contactUrl");
+  }
   const db = getDb();
   const [row] = await db
     .insert(contacts)
     .values({
       postingId: data.postingId,
-      email: data.email.toLowerCase(),
+      email: data.email ? data.email.toLowerCase() : null,
+      contactUrl: data.contactUrl ?? null,
       sourceType: data.sourceType,
       confidence: data.confidence,
     })
@@ -212,6 +218,7 @@ export async function listJobsNeedingDraft(limit: number) {
     .where(
       and(
         isNull(outreachEmails.id),
+        isNotNull(contacts.email),
         ne(contacts.sourceType, SKIPPED_SOURCE)
       )
     )
@@ -250,7 +257,7 @@ export async function listApprovedOutreach(limit: number) {
     .from(outreachEmails)
     .innerJoin(contacts, eq(contacts.id, outreachEmails.contactId))
     .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
-    .where(eq(outreachEmails.status, "approved"))
+    .where(and(eq(outreachEmails.status, "approved"), isNotNull(contacts.email)))
     .limit(limit);
 }
 
@@ -265,7 +272,7 @@ export async function listPendingOutreach(limit: number) {
     .from(outreachEmails)
     .innerJoin(contacts, eq(contacts.id, outreachEmails.contactId))
     .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
-    .where(eq(outreachEmails.status, "pending"))
+    .where(and(eq(outreachEmails.status, "pending"), isNotNull(contacts.email)))
     .limit(limit);
 }
 

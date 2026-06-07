@@ -1,11 +1,19 @@
 import { env } from "@/lib/env";
 
+export interface ScrapedDomElement {
+  tag: string;
+  attributes: Record<string, unknown>;
+  text: string;
+}
+
 export interface ScrapedContactPage {
   url: string;
   /** Visible text of the page (Playwright `document.body.innerText` or BS4 fallback). */
   text: string;
   /** Every `mailto:` link found on the page. */
   mailtos: string[];
+  /** Compact BeautifulSoup DOM element dump for email-focused extraction. */
+  elements?: ScrapedDomElement[];
   /** Which engine actually scraped this page. */
   engine: "playwright" | "requests" | "requests_after_playwright_error" | "none";
   ok: boolean;

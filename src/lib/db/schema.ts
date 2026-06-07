@@ -63,7 +63,8 @@ export const contacts = pgTable(
     postingId: integer("posting_id")
       .references(() => jobPostings.id)
       .notNull(),
-    email: text("email").notNull(),
+    email: text("email"),
+    contactUrl: text("contact_url"),
     sourceType: text("source_type").notNull(),
     confidence: numeric("confidence", { precision: 3, scale: 2 }).notNull(),
     verified: boolean("verified").default(false).notNull(),
@@ -71,6 +72,10 @@ export const contacts = pgTable(
   },
   (table) => [
     uniqueIndex("contacts_posting_email_idx").on(table.postingId, table.email),
+    uniqueIndex("contacts_posting_contact_url_idx").on(
+      table.postingId,
+      table.contactUrl
+    ),
   ]
 );
 

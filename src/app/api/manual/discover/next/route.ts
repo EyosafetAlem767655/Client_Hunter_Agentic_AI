@@ -3,7 +3,7 @@ import { verifyAdminAuth } from "@/lib/auth";
 import { discoverNextContacts } from "@/lib/agent/action";
 import { getDiscoveryProgress } from "@/lib/db/queries";
 
-// Each call does at most ~5 Grok lookups; one cycle finishes well inside
+// Each call processes at most ~5 companies; one cycle finishes well inside
 // the Vercel Hobby ceiling so the UI loop never 504s.
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       {
         ok: false,
         error: e instanceof Error ? e.message : String(e),
-        hint: "Check Grok / Neon connectivity and that the contact discovery chain isn't blocked.",
+        hint: "Check LangSearch / OpenAI / Neon connectivity and that the contact discovery chain isn't blocked.",
       },
       { status: 200 }
     );

@@ -1,7 +1,8 @@
 import { env } from "@/lib/env";
-import { callGrokJson, isGrokConfigured } from "@/lib/llm/grok";
 import { assertAllowedUrl } from "@/lib/scrapers/base";
 import { logEvent } from "@/lib/agent/observability";
+import { findContactUrls } from "@/lib/langsearch/client";
+import { filterContactUrls } from "./url-filter";
 import {
   scrapeContactPages,
   type ScrapedContactPage,
@@ -15,8 +16,6 @@ const MAILTO_REGEX = /mailto:([^\s"'<>]+)/gi;
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-// Don't surface emails that point back at the job-board itself; they belong
-// to the board, not the employer.
 const JOB_BOARD_DOMAINS = [
   "remotive.com",
   "weworkremotely.com",
@@ -34,7 +33,6 @@ const JOB_BOARD_DOMAINS = [
   "workatastartup.com",
 ];
 
-// Generic noise that's almost never a real employer contact.
 const EMAIL_BLOCKLIST_LOCAL = new Set([
   "noreply",
   "no-reply",
@@ -47,6 +45,7 @@ const EMAIL_BLOCKLIST_LOCAL = new Set([
   "test",
   "sentry",
 ]);
+
 const EMAIL_BLOCKLIST_DOMAIN = [
   "sentry.io",
   "sentry-next.wixpress.com",
@@ -64,6 +63,22 @@ const EMAIL_BLOCKLIST_DOMAIN = [
   ...JOB_BOARD_DOMAINS,
 ];
 
+const COMPANY_PATHS = [
+  "/contact",
+  "/contact-us",
+  "/contacts",
+  "/about",
+  "/about-us",
+  "/team",
+  "/careers",
+  "/jobs",
+  "/support",
+  "/help",
+  "/press",
+  "/legal/privacy",
+  "/privacy",
+];
+
 export function isUsefulEmail(email: string): boolean {
   const lower = email.toLowerCase();
   const [local, domain] = lower.split("@");
@@ -72,7 +87,6 @@ export function isUsefulEmail(email: string): boolean {
   if (EMAIL_BLOCKLIST_DOMAIN.some((d) => domain === d || domain.endsWith("." + d))) {
     return false;
   }
-  // Drop image-style "u003e" or huge tokens that came out of garbage HTML.
   if (local.length > 64 || domain.length > 64) return false;
   return true;
 }
@@ -80,20 +94,24 @@ export function isUsefulEmail(email: string): boolean {
 export function extractEmailsFromText(text: string): string[] {
   const found = new Set<string>();
   let match: RegExpExecArray | null;
+
   const mailtoCopy = new RegExp(MAILTO_REGEX.source, MAILTO_REGEX.flags);
   while ((match = mailtoCopy.exec(text)) !== null) {
     found.add(match[1].toLowerCase());
   }
+
   const emailCopy = new RegExp(EMAIL_REGEX.source, EMAIL_REGEX.flags);
   while ((match = emailCopy.exec(text)) !== null) {
     found.add(match[0].toLowerCase());
   }
+
   return Array.from(found).filter(isUsefulEmail);
 }
 
 export function discoverFromBody(description: string): DiscoveredContact[] {
   return extractEmailsFromText(description).map((email) => ({
     email,
+    contactUrl: null,
     sourceType: "listed" as const,
     confidence: 0.9,
   }));
@@ -111,22 +129,6 @@ function extractCompanyDomain(url: string): string | null {
   }
 }
 
-const COMPANY_PATHS = [
-  "/contact",
-  "/contact-us",
-  "/contacts",
-  "/about",
-  "/about-us",
-  "/team",
-  "/careers",
-  "/jobs",
-  "/support",
-  "/help",
-  "/press",
-  "/legal/privacy",
-  "/privacy",
-];
-
 export async function discoverFromCompanySite(
   siteUrl: string,
   fetchFn: (url: string) => Promise<string> = defaultFetch
@@ -142,17 +144,17 @@ export async function discoverFromCompanySite(
   const seen = new Set<string>();
   const collected: DiscoveredContact[] = [];
 
-  // Always try the homepage first — most companies put contact info in the footer.
-  const candidates = ["/", ...COMPANY_PATHS];
-  for (const path of candidates) {
+  for (const path of ["/", ...COMPANY_PATHS]) {
     try {
-      const html = await fetchFn(`${origin}${path}`);
+      const url = `${origin}${path}`;
+      const html = await fetchFn(url);
       const emails = extractEmailsFromText(html);
       for (const email of emails) {
         if (seen.has(email)) continue;
         seen.add(email);
         collected.push({
           email,
+          contactUrl: url,
           sourceType: "scraped_from_site",
           confidence: rankByPrefix(email),
         });
@@ -162,14 +164,10 @@ export async function discoverFromCompanySite(
       continue;
     }
   }
+
   return collected;
 }
 
-/**
- * Confidence ranking: role-based addresses (careers@, hr@, hiring@) are
- * better cold-outreach targets than personal emails like dave@. Higher is
- * better; capped at 0.85 so listed-in-body emails (0.9) still win.
- */
 function rankByPrefix(email: string): number {
   const local = email.split("@")[0]?.toLowerCase() ?? "";
   const high = ["careers", "hiring", "jobs", "hr", "people", "recruiting", "talent"];
@@ -179,12 +177,6 @@ function rankByPrefix(email: string): number {
   return 0.55;
 }
 
-/**
- * Search the open web for the company's contact email. We use DuckDuckGo's
- * HTML endpoint because it has no API key requirement and returns plain
- * HTML; that lets us extract candidate emails directly from result
- * snippets without paid services like Google CSE or Hunter.io.
- */
 export async function discoverViaSearch(
   company: string,
   fetchFn: (url: string) => Promise<string> = defaultFetch
@@ -206,10 +198,9 @@ export async function discoverViaSearch(
       for (const email of emails) {
         if (seen.has(email)) continue;
         seen.add(email);
-        // Slight confidence penalty vs. on-site scraping — search hits can
-        // be third-party mentions.
         collected.push({
           email,
+          contactUrl: null,
           sourceType: "scraped_from_site",
           confidence: Math.max(0.5, rankByPrefix(email) - 0.1),
         });
@@ -219,13 +210,10 @@ export async function discoverViaSearch(
       continue;
     }
   }
+
   return collected;
 }
 
-/**
- * Find a likely company homepage URL by searching the web for the company
- * name and returning the first non-job-board result.
- */
 export async function findCompanyHomepage(
   company: string,
   fetchFn: (url: string) => Promise<string> = defaultFetch
@@ -233,8 +221,6 @@ export async function findCompanyHomepage(
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`${company} official website`)}`;
   try {
     const html = await fetchFn(url);
-    // DuckDuckGo wraps result URLs in /l/?uddg=<encoded> — grab any http(s)
-    // URL from the page and pick the first that isn't a job board or DDG link.
     const urlMatches = html.match(/https?:\/\/[^\s"'<>]+/g) ?? [];
     for (const raw of urlMatches) {
       const candidate = decodeRedirect(raw);
@@ -247,17 +233,16 @@ export async function findCompanyHomepage(
       return `https://${host}`;
     }
   } catch {
-    /* swallow */
+    // Search fallback is best effort only.
   }
   return null;
 }
 
 function decodeRedirect(url: string): string {
-  // DDG wraps with /l/?uddg=<percent-encoded>
-  const m = url.match(/[?&]uddg=([^&]+)/);
-  if (m) {
+  const match = url.match(/[?&]uddg=([^&]+)/);
+  if (match) {
     try {
-      return decodeURIComponent(m[1]);
+      return decodeURIComponent(match[1]);
     } catch {
       return url;
     }
@@ -273,112 +258,92 @@ function safeHost(url: string): string | null {
   }
 }
 
-const GROK_SYSTEM_PROMPT = "You are Grok.";
-
-/**
- * Ask Grok specifically for the "Contact us" page URL of a company, then
- * hand the URL(s) to the Python DOM-scrape service, then let OpenAI pick
- * the right email from the rendered content. No more TS `fetch + regex`
- * scraping — the regex was missing JS-rendered addresses and the OpenAI
- * extractor handles obfuscated / "info [at] foo dot com" formats too.
- */
-export async function discoverViaGrok(
+export async function discoverViaLangSearch(
   company: string,
   posting?: { title?: string; url?: string }
 ): Promise<DiscoveredContact[]> {
-  if (!isGrokConfigured()) return [];
   const normalizedCompany = company.trim();
-  if (!normalizedCompany || normalizedCompany.length < 2) return [];
+  if (!normalizedCompany || normalizedCompany.length < 2) {
+    return posting?.url ? [urlOnlyContact(posting.url, 0.2)] : [];
+  }
 
-  void posting;
-  const userPrompt = `Search the contact us URL for this company: ${normalizedCompany}`;
-
-  let result: Awaited<ReturnType<typeof callGrokJson<unknown>>>;
+  let candidateUrls: string[] = [];
   try {
-    result = await callGrokJson<unknown>({
-      system: GROK_SYSTEM_PROMPT,
-      user: userPrompt,
-      timeoutMs: 25_000,
-    });
+    const results = await findContactUrls(normalizedCompany);
+    candidateUrls = await filterContactUrls(normalizedCompany, results);
   } catch (e) {
-    await logEvent("warn", "Grok single-company HTTP error", {
-      company,
+    await logEvent("warn", "LangSearch URL discovery failed", {
+      company: normalizedCompany,
       error: e instanceof Error ? e.message : String(e),
     });
-    return [];
   }
 
-  // Contact URL wins over homepage — the LLM extractor sees the contact
-  // page first and stops there if it's enough.
-  const candidateUrls = collectCandidateUrls(result.raw, result.citations);
-  if (candidateUrls.length === 0) return [];
+  if (candidateUrls.length === 0) {
+    return posting?.url ? [urlOnlyContact(posting.url, 0.2)] : [];
+  }
 
-  const emails = await scrapeAndExtract(candidateUrls);
-  return scoreGrokEmails(emails);
+  const { emails, urls } = await scrapeAndExtract(candidateUrls);
+  const sourceUrl = urls[0] ?? candidateUrls[0];
+  const emailContacts = scoreLangSearchEmails(emails, sourceUrl);
+  if (emailContacts.length > 0) return emailContacts;
+
+  return [urlOnlyContact(sourceUrl, 0.4)];
 }
 
-/**
- * Compatibility wrapper for callers that still hand in a batch. Grok itself
- * is called once per company because the simple prompt matches the behavior
- * that works in the Grok web UI more reliably than multi-company JSON output.
- */
-export async function discoverViaGrokBatch(
-  inputs: Array<{ company: string; jobTitle?: string; jobUrl?: string }>
-): Promise<Map<string, DiscoveredContact[]>> {
-  const out = new Map<string, DiscoveredContact[]>();
-  if (!isGrokConfigured()) return out;
+async function scrapeAndExtract(
+  urls: string[]
+): Promise<{ emails: string[]; urls: string[]; pages: ScrapedContactPage[] }> {
+  const safe = prepareScrapeUrls(urls);
+  if (safe.length === 0) return { emails: [], urls: [], pages: [] };
 
-  const byCompany = new Map<string, { company: string; jobTitle?: string; jobUrl?: string }>();
-  for (const input of inputs) {
-    const key = input.company?.trim();
-    if (!key || key.length < 2) continue;
-    if (!byCompany.has(key.toLowerCase())) {
-      byCompany.set(key.toLowerCase(), input);
+  let pages: ScrapedContactPage[];
+  try {
+    const result = await scrapeContactPages(safe);
+    pages = result.results;
+  } catch (e) {
+    await logEvent("warn", "scrapeContactPages failed", {
+      urlCount: safe.length,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return { emails: [], urls: safe, pages: [] };
+  }
+
+  if (pages.length === 0) return { emails: [], urls: safe, pages };
+  const emails = await extractEmailsFromPages(pages);
+  return { emails, urls: safe, pages };
+}
+
+function prepareScrapeUrls(urls: string[]): string[] {
+  const safe: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of urls.slice(0, 3)) {
+    const url = normalizeCandidateUrl(raw);
+    if (!url) continue;
+    try {
+      assertAllowedUrl(url);
+    } catch {
+      continue;
+    }
+    pushUrl(url);
+
+    try {
+      const parsed = new URL(url);
+      if (!parsed.pathname.toLowerCase().includes("contact")) {
+        pushUrl(`${parsed.origin}/contact`);
+      }
+    } catch {
+      // Already normalized above.
     }
   }
-  const deduped = Array.from(byCompany.values());
-  if (deduped.length === 0) return out;
 
-  let matched = 0;
-  for (const input of deduped) {
-    const contacts = await discoverViaGrok(input.company, {
-      title: input.jobTitle,
-      url: input.jobUrl,
-    });
-    if (contacts.length === 0) continue;
-    out.set(input.company, contacts);
-    matched++;
+  return safe;
+
+  function pushUrl(url: string) {
+    if (seen.has(url)) return;
+    seen.add(url);
+    safe.push(url);
   }
-
-  await logEvent("info", "Grok batch compatibility processed", {
-    requested: deduped.length,
-    matched,
-  });
-
-  return out;
-}
-
-function collectCandidateUrls(raw: string, citations: string[]): string[] {
-  const seen = new Map<string, number>();
-  const push = (u: string | null | undefined) => {
-    if (!u || typeof u !== "string") return;
-    const normalized = normalizeCandidateUrl(u);
-    if (!normalized || seen.has(normalized)) return;
-    seen.set(normalized, seen.size);
-  };
-  for (const u of citations) push(u);
-  for (const u of extractUrlsFromText(raw)) push(u);
-  return Array.from(seen.entries())
-    .sort(([a, aIndex], [b, bIndex]) => {
-      const rank = rankCandidateUrl(a) - rankCandidateUrl(b);
-      return rank === 0 ? aIndex - bIndex : rank;
-    })
-    .map(([url]) => url);
-}
-
-function extractUrlsFromText(text: string): string[] {
-  if (!text) return [];
-  return text.match(/https?:\/\/[^\s"'<>)\]]+/g) ?? [];
 }
 
 function normalizeCandidateUrl(raw: string): string | null {
@@ -397,113 +362,38 @@ function normalizeCandidateUrl(raw: string): string | null {
   }
 }
 
-function rankCandidateUrl(url: string): number {
-  try {
-    const parsed = new URL(url);
-    const path = parsed.pathname.toLowerCase();
-    if (path.includes("contact")) return 0;
-    if (
-      path.includes("support") ||
-      path.includes("help") ||
-      path.includes("about")
-    ) {
-      return 1;
-    }
-    if (path === "/" || path === "") return 3;
-    return 2;
-  } catch {
-    return 4;
-  }
-}
-
-/**
- * Take the URL(s) Grok produced for a single company, send them to the
- * Python `/api/py/scrape-contact` service (Playwright when available,
- * `requests + BeautifulSoup` fallback), then ask OpenAI to pick the best
- * outreach email out of the rendered DOM. This is the path the user
- * specified: Grok → URL → Python DOM scrape → OpenAI extraction.
- *
- * Returns an ordered list of emails (best first). Empty array on any
- * failure so the caller can fall through to mark-as-skipped.
- */
-async function scrapeAndExtract(urls: string[]): Promise<string[]> {
-  // Strip URLs pointing at blocked job-board / ATS domains; Grok sometimes
-  // cites these as the "contact page" and they're never useful.
-  const safe: string[] = [];
-  const seen = new Set<string>();
-  for (const url of urls.slice(0, 3)) {
-    try {
-      assertAllowedUrl(url);
-    } catch {
-      continue;
-    }
-    if (seen.has(url)) continue;
-    seen.add(url);
-    safe.push(url);
-    // Always tee up the same-origin `/contact` page too — many companies
-    // put their email there but Grok cites the homepage.
-    try {
-      const origin = new URL(url).origin;
-      const contact = `${origin}/contact`;
-      if (!seen.has(contact)) {
-        seen.add(contact);
-        safe.push(contact);
-      }
-    } catch {
-      /* skip malformed URL */
-    }
-  }
-  if (safe.length === 0) return [];
-
-  let pages: ScrapedContactPage[];
-  try {
-    const result = await scrapeContactPages(safe);
-    pages = result.results;
-  } catch (e) {
-    await logEvent("warn", "scrapeContactPages failed", {
-      urlCount: safe.length,
-      error: e instanceof Error ? e.message : String(e),
-    });
-    return [];
-  }
-  if (pages.length === 0) return [];
-
-  // OpenAI does the final filter — picks the role-based contact, skips
-  // noreply / footer noise, handles obfuscated "info [at] foo dot com".
-  return extractEmailsFromPages(pages);
-}
-
-/**
- * Loose filter: drop ONLY obvious automation noise. We deliberately don't
- * reject job-board / ATS / tracker domains here — small studios sometimes
- * have their genuine mailbox hosted at a third party (e.g. a Wix-hosted
- * address), and rejecting them costs us more leads than we save in noise.
- */
-function isAcceptableGrokEmail(email: string): boolean {
-  const lower = email.toLowerCase();
-  const local = lower.split("@")[0] ?? "";
-  if (!local || !lower.includes("@")) return false;
-  if (EMAIL_BLOCKLIST_LOCAL.has(local)) return false;
-  if (local.length > 64) return false;
-  return true;
-}
-
-function scoreGrokEmails(ordered: string[]): DiscoveredContact[] {
+function scoreLangSearchEmails(
+  ordered: string[],
+  contactUrl: string | null
+): DiscoveredContact[] {
   const contacts: DiscoveredContact[] = [];
   const seen = new Set<string>();
+
   for (let i = 0; i < ordered.length; i++) {
     const email = ordered[i].toLowerCase().trim();
     if (seen.has(email)) continue;
-    if (!isAcceptableGrokEmail(email)) continue;
+    if (!isUsefulEmail(email)) continue;
     seen.add(email);
-    const baseConf = i === 0 ? 0.9 : 0.72 - i * 0.04;
+
+    const baseConf = i === 0 ? 0.92 : 0.74 - i * 0.04;
     contacts.push({
       email,
-      sourceType: "scraped_from_site",
+      contactUrl,
+      sourceType: "langsearch_scraped",
       confidence: Math.max(0.5, Math.min(0.95, baseConf)),
     });
   }
+
   return contacts;
+}
+
+function urlOnlyContact(url: string, confidence: number): DiscoveredContact {
+  return {
+    email: null,
+    contactUrl: url,
+    sourceType: "url_only",
+    confidence,
+  };
 }
 
 export function discoverByPatternGuess(
@@ -516,8 +406,8 @@ export function discoverByPatternGuess(
   const prefixes = ["careers@", "jobs@", "hiring@", "hr@", "hello@", "contact@"];
   return prefixes.map((prefix, i) => ({
     email: `${prefix}${domain}`,
+    contactUrl: companyUrl,
     sourceType: "pattern_guessed" as const,
-    // First prefix slightly higher confidence than the rest.
     confidence: Math.max(0.25, 0.4 - i * 0.03),
   }));
 }
@@ -540,7 +430,7 @@ export function pickBestContact(
   contacts: DiscoveredContact[]
 ): DiscoveredContact | null {
   if (contacts.length === 0) return null;
-  return contacts.sort((a, b) => b.confidence - a.confidence)[0];
+  return [...contacts].sort((a, b) => b.confidence - a.confidence)[0];
 }
 
 export async function discoverContactsForPosting(
@@ -549,60 +439,20 @@ export async function discoverContactsForPosting(
     url: string;
     company: string;
   },
-  options: { skipGrok?: boolean } = {}
+  options: { skipLangSearch?: boolean } = {}
 ): Promise<DiscoveredContact[]> {
-  // 1. Easiest + cheapest: the posting body sometimes lists a hiring email.
   const fromBody = discoverFromBody(posting.description);
   if (fromBody.length > 0) return fromBody;
 
-  const accumulated: DiscoveredContact[] = [];
-
-  // 2. Ask Grok to find the right email via live web search. This is the
-  //    most accurate path — Grok visits the company's real site, picks the
-  //    role-based address, and cites the source page. Skipped when
-  //    GROK_API_KEY isn't configured so the build stays fully optional.
-  //    Also skipped when the caller has already run the bulk Grok pass.
-  if (posting.company && isGrokConfigured() && !options.skipGrok) {
-    const fromGrok = await discoverViaGrok(posting.company, {
+  if (!options.skipLangSearch && posting.company) {
+    const fromLangSearch = await discoverViaLangSearch(posting.company, {
       title: posting.description.slice(0, 120),
       url: posting.url,
     });
-    accumulated.push(...fromGrok);
+    if (fromLangSearch.length > 0) return fromLangSearch;
   }
 
-  // 3. Try the posting URL's company website (if it isn't a job board).
-  if (accumulated.length === 0) {
-    const companyDomain = extractCompanyDomain(posting.url);
-    if (companyDomain) {
-      const fromSite = await discoverFromCompanySite(`https://${companyDomain}`);
-      accumulated.push(...fromSite);
-    }
-  }
-
-  // 4. DuckDuckGo lookup for the company's actual homepage + scrape it.
-  if (accumulated.length === 0 && posting.company) {
-    const homepage = await findCompanyHomepage(posting.company);
-    if (homepage) {
-      const fromHomepage = await discoverFromCompanySite(homepage);
-      accumulated.push(...fromHomepage);
-    }
-  }
-
-  // 5. DDG search-result snippets as a last open-web pass.
-  if (accumulated.length === 0 && posting.company) {
-    const fromSearch = await discoverViaSearch(posting.company);
-    accumulated.push(...fromSearch);
-  }
-
-  // 6. Pattern-guess fallback (opt-in via env).
-  if (accumulated.length === 0) {
-    const companyDomain = extractCompanyDomain(posting.url);
-    if (companyDomain) {
-      accumulated.push(...discoverByPatternGuess(posting.url));
-    }
-  }
-
-  return accumulated;
+  return posting.url ? [urlOnlyContact(posting.url, 0.2)] : [];
 }
 
 export function extractCompanyUrlFromDescription(description: string): string | null {

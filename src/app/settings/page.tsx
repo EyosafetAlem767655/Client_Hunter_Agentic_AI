@@ -33,10 +33,9 @@ export default async function SettingsPage() {
           GMAIL_USER: env.GMAIL_USER,
           GMAIL_APP_PASSWORD: maskSecret(env.GMAIL_APP_PASSWORD),
           ADMIN_TOKEN: maskSecret(env.ADMIN_TOKEN),
-          GROK_API_KEY: env.GROK_API_KEY
-            ? maskSecret(env.GROK_API_KEY)
+          LANGSEARCH_API_KEY: env.LANGSEARCH_API_KEY
+            ? maskSecret(env.LANGSEARCH_API_KEY)
             : "(not set)",
-          GROK_MODEL: env.GROK_MODEL,
           DRY_RUN: env.DRY_RUN,
           AGENT_ENABLED: env.AGENT_ENABLED,
         }}

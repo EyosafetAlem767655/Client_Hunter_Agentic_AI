@@ -19,10 +19,16 @@ export interface RawPosting {
   raw: Record<string, unknown>;
 }
 
-export type ContactSourceType = "listed" | "pattern_guessed" | "scraped_from_site";
+export type ContactSourceType =
+  | "listed"
+  | "pattern_guessed"
+  | "scraped_from_site"
+  | "langsearch_scraped"
+  | "url_only";
 
 export interface DiscoveredContact {
-  email: string;
+  email: string | null;
+  contactUrl?: string | null;
   sourceType: ContactSourceType;
   confidence: number;
 }

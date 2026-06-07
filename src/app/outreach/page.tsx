@@ -42,7 +42,7 @@ export default async function OutreachPage({
         subject: email.subject,
         body: email.body,
         status: email.status,
-        recipient: contact.email,
+        recipient: contact.email ?? "",
         company: posting.company,
         jobTitle: posting.title,
       }));

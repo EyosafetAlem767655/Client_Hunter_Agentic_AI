@@ -49,9 +49,16 @@ function buildUserPrompt(pages: ScrapedContactPage[]): string {
     // Cap each page at ~6k chars — emails almost always appear in the
     // first screen of a contact page; sending more wastes tokens.
     const trimmed = (p.text ?? "").slice(0, 6_000);
+    const elements = selectEmailRelevantElements(p)
+      .map((element) => JSON.stringify(element))
+      .join("\n")
+      .slice(0, 8_000);
     return [
       `=== Page ${i + 1}: ${p.url} (engine: ${p.engine}) ===`,
       mailtos,
+      elements
+        ? `Relevant DOM elements:\n${elements}`
+        : "Relevant DOM elements: (none)",
       "",
       trimmed,
     ].join("\n");
@@ -62,6 +69,34 @@ function buildUserPrompt(pages: ScrapedContactPage[]): string {
     "",
     ...blocks,
   ].join("\n");
+}
+
+function selectEmailRelevantElements(
+  page: ScrapedContactPage
+): Array<{ tag: string; attributes: Record<string, unknown>; text: string }> {
+  const elements = Array.isArray(page.elements) ? page.elements : [];
+  return elements
+    .filter((element) => {
+      const attrs = JSON.stringify(element.attributes ?? {}).toLowerCase();
+      const text = (element.text ?? "").toLowerCase();
+      const haystack = `${attrs} ${text}`;
+      return (
+        haystack.includes("@") ||
+        haystack.includes("mailto:") ||
+        haystack.includes("email") ||
+        haystack.includes("contact") ||
+        haystack.includes("career") ||
+        haystack.includes("hiring") ||
+        haystack.includes("recruit") ||
+        haystack.includes("talent")
+      );
+    })
+    .slice(0, 120)
+    .map((element) => ({
+      tag: element.tag,
+      attributes: element.attributes ?? {},
+      text: (element.text ?? "").slice(0, 500),
+    }));
 }
 
 /**

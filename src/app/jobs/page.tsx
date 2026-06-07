@@ -60,6 +60,7 @@ export default async function JobsPage({
         ? new Date(row.posting.scrapedAt).toISOString()
         : null,
       contactEmail: row.contact?.email ?? null,
+      contactUrl: row.contact?.contactUrl ?? null,
     }));
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load jobs";

@@ -135,10 +135,10 @@ export async function runScrapePipelineFromPostings(
       });
     }
 
-    // NB: Grok contact discovery + draft + send used to run here too, but
+    // NB: contact discovery + draft + send used to run here too, but
     // 80+ scraped postings push the combined pipeline past the Vercel
-    // Hobby 60 s function ceiling (HTTP 504). Discovery is the slow step
-    // (Grok chains 3-5 searches per company), so it now lives in
+    // Hobby 60 s function ceiling (HTTP 504). Discovery is the slow step,
+    // so it now lives in
     // runOutreachPipeline instead. The manual scrape UI chains a call to
     // /api/manual/outreach immediately after, and the 14:00 UTC outreach
     // cron picks anything up that's still pending.
@@ -225,8 +225,8 @@ export async function runOutreachPipeline(): Promise<PipelineSummary> {
     // discoverNextContacts(1) until the budget runs out. The 30 s rest
     // the manual UI imposes between calls isn't realistic from a cron
     // function (60 s budget total), so cron uses a much shorter 2 s rest
-    // — still enough to be polite to xAI without blowing past the
-    // function ceiling. The manual UI in Settings enforces the 30 s
+    // — still enough to avoid hammering external APIs without blowing past
+    // the function ceiling. The manual UI in Settings enforces the 30 s
     // rest itself.
     const { discoverNextContacts } = await import("./action");
     let discovered = 0;

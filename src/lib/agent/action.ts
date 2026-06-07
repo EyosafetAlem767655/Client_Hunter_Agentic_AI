@@ -2,16 +2,8 @@ import { env, CRON_EMAIL_LIMIT, CONTACT_DISCOVERY_CONCURRENCY } from "@/lib/env"
 import {
   discoverContactsForPosting,
   discoverFromBody,
-  discoverViaGrokBatch,
-  isUsefulEmail,
   pickBestContact,
 } from "@/lib/contact/discovery";
-import type { DiscoveredContact } from "@/types";
-import { isGrokConfigured } from "@/lib/llm/grok";
-import {
-  findCompanyEmails,
-  isLangSearchConfigured,
-} from "@/lib/langsearch/client";
 import { finalizeEmailBody } from "@/lib/email/templates";
 import { sendEmail } from "@/lib/email/transport";
 import { callOpenAIJson } from "@/lib/llm/client";
@@ -21,344 +13,163 @@ import {
   parseDraftedEmail,
 } from "@/lib/llm/schemas";
 import { sha256Hex } from "@/lib/hash";
+import type { DiscoveredContact } from "@/types";
 import { runAllGuardrails } from "./guardrails";
 import { memory } from "./memory";
 import { logEvent } from "./observability";
 import { withConcurrency } from "./reasoning";
 
-/**
- * Grok batch size. Smaller batches mean smaller per-call latency and a
- * higher hit rate — Grok's structured-output reliability drops fast once
- * we ask it about 5+ companies in one go, so we send 3 at a time.
- */
-export const GROK_LOOKUP_BATCH_SIZE = 3;
+type DiscoveryMethod = "body" | "langsearch" | "url_only" | "fallback" | null;
 
-/**
- * Sentinel sourceType for "we tried to discover an email for this posting
- * and came up empty." A row with this sourceType counts as a contact for
- * the purposes of `listTopRelevantWithoutContacts` (so the 1-by-1 loop
- * advances to the next pending job) but is filtered out everywhere else
- * — dashboard counts, draft queue, with-contact page.
- */
-export const SKIPPED_SOURCE_TYPE = "skipped";
+interface DiscoveryResultRow {
+  postingId: number;
+  company: string;
+  title: string;
+  email: string | null;
+  contactUrl: string | null;
+  method: DiscoveryMethod;
+}
 
-async function markPostingSkipped(postingId: number): Promise<void> {
-  try {
-    await memory.upsertContact({
-      postingId,
-      email: `__skipped-${postingId}@talentbridge.skip`,
-      sourceType: SKIPPED_SOURCE_TYPE,
-      confidence: "0.00",
-    });
-  } catch (e) {
-    await logEvent("warn", "Failed to mark posting as skipped", {
-      postingId,
-      error: e instanceof Error ? e.message : String(e),
-    });
+function methodForContact(contact: DiscoveredContact | null): DiscoveryMethod {
+  if (!contact) return null;
+  switch (contact.sourceType) {
+    case "listed":
+      return "body";
+    case "langsearch_scraped":
+      return "langsearch";
+    case "url_only":
+      return "url_only";
+    default:
+      return "fallback";
   }
 }
 
+function postingUrlOnlyContact(url: string): DiscoveredContact {
+  return {
+    email: null,
+    contactUrl: url,
+    sourceType: "url_only",
+    confidence: 0.2,
+  };
+}
+
+async function persistDiscoveredContact(
+  postingId: number,
+  contact: DiscoveredContact
+) {
+  return memory.upsertContact({
+    postingId,
+    email: contact.email,
+    contactUrl: contact.contactUrl ?? null,
+    sourceType: contact.sourceType,
+    confidence: contact.confidence.toFixed(2),
+  });
+}
+
+async function discoverBestForPosting(posting: {
+  id: number;
+  description: string;
+  url: string;
+  company: string;
+}): Promise<DiscoveredContact> {
+  const fromBody = pickBestContact(discoverFromBody(posting.description));
+  if (fromBody) return fromBody;
+
+  const discovered = await discoverContactsForPosting({
+    description: posting.description,
+    url: posting.url,
+    company: posting.company,
+  });
+  return pickBestContact(discovered) ?? postingUrlOnlyContact(posting.url);
+}
+
 /**
- * Process the next N pending jobs through the contact-discovery chain
- * (body → batched Grok → DDG → on-site → pattern). The "1-by-1" UI loop
- * calls this with limit=1 (or 2) so each HTTP request finishes in well
- * under the Vercel Hobby 60 s budget, then waits a short "rest" before
- * the next request. Returns enough detail for the progress bar.
+ * Process the next N pending jobs through contact discovery. Every attempted
+ * relevant posting gets a contact row: a deliverable email when extraction
+ * succeeds, otherwise a URL-only row for manual review and progress tracking.
  */
 export async function discoverNextContacts(limit: number): Promise<{
   attempted: number;
   found: number;
-  results: Array<{
-    postingId: number;
-    company: string;
-    title: string;
-    email: string | null;
-    method: "body" | "langsearch" | "grok" | "fallback" | null;
-  }>;
+  results: DiscoveryResultRow[];
 }> {
   const slot = Math.max(1, Math.min(5, limit | 0));
   const jobs = await memory.listTopRelevantWithoutContacts(slot);
-  const results: Array<{
-    postingId: number;
-    company: string;
-    title: string;
-    email: string | null;
-    method: "body" | "langsearch" | "grok" | "fallback" | null;
-  }> = [];
+  const results: DiscoveryResultRow[] = [];
   if (jobs.length === 0) return { attempted: 0, found: 0, results };
 
   let found = 0;
 
-  // Try posting body emails first (no network).
-  const stillMissing: typeof jobs = [];
   for (const row of jobs) {
-    const fromBody = discoverFromBody(row.posting.description);
-    const best = pickBestContact(fromBody);
-    if (best) {
-      try {
-        await memory.upsertContact({
-          postingId: row.posting.id,
-          email: best.email,
-          sourceType: best.sourceType,
-          confidence: best.confidence.toFixed(2),
-        });
-        found++;
-        results.push({
-          postingId: row.posting.id,
-          company: row.posting.company,
-          title: row.posting.title,
-          email: best.email,
-          method: "body",
-        });
-      } catch {
-        stillMissing.push(row);
-      }
-    } else {
-      stillMissing.push(row);
-    }
-  }
-
-  // LangSearch pass — runs BEFORE Grok because it's the cheaper, faster
-  // lookup. We only fall through to Grok for companies LangSearch came up
-  // empty on, which usually halves the Grok cost.
-  const afterLangSearch: typeof stillMissing = [];
-  if (stillMissing.length > 0 && isLangSearchConfigured()) {
-    for (const row of stillMissing) {
-      try {
-        const emails = await findCompanyEmails(row.posting.company);
-        const usable = emails.filter(isUsefulEmail);
-        if (usable.length === 0) {
-          afterLangSearch.push(row);
-          continue;
-        }
-        const email = usable[0];
-        await memory.upsertContact({
-          postingId: row.posting.id,
-          email,
-          sourceType: "scraped_from_site",
-          confidence: "0.88",
-        });
-        found++;
-        results.push({
-          postingId: row.posting.id,
-          company: row.posting.company,
-          title: row.posting.title,
-          email,
-          method: "langsearch",
-        });
-      } catch (e) {
-        await logEvent("warn", "discoverNext: LangSearch failed", {
-          postingId: row.posting.id,
-          error: e instanceof Error ? e.message : String(e),
-        });
-        afterLangSearch.push(row);
-      }
-    }
-  } else {
-    afterLangSearch.push(...stillMissing);
-  }
-
-  // Grok the rest in ONE small batch (≤ slot size, so ≤ 5 by construction).
-  // Anything Grok can't resolve gets marked as skipped — the previous
-  // "fallback chain" (DDG + on-site crawl + pattern guess) fanned out
-  // into dozens of HTTP fetches per posting and was the main cause of
-  // the /api/manual/discover/next 504s.
-  if (afterLangSearch.length > 0 && isGrokConfigured()) {
-    const inputs = afterLangSearch.map(({ posting }) => ({
-      company: posting.company,
-      jobTitle: posting.title,
-      jobUrl: posting.url,
-    }));
-    let map: Awaited<ReturnType<typeof discoverViaGrokBatch>> = new Map();
+    let best: DiscoveredContact;
     try {
-      map = await discoverViaGrokBatch(inputs);
+      best = await discoverBestForPosting(row.posting);
+      await persistDiscoveredContact(row.posting.id, best);
+      found++;
     } catch (e) {
-      await logEvent("warn", "discoverNext: Grok lookup failed", {
-        size: inputs.length,
-        error: e instanceof Error ? e.message : String(e),
-      });
+      best = postingUrlOnlyContact(row.posting.url);
+      try {
+        await persistDiscoveredContact(row.posting.id, best);
+        found++;
+      } catch (inner) {
+        await logEvent("warn", "Contact discovery upsert failed", {
+          postingId: row.posting.id,
+          company: row.posting.company,
+          error: inner instanceof Error ? inner.message : String(inner),
+          discoveryError: e instanceof Error ? e.message : String(e),
+        });
+        results.push({
+          postingId: row.posting.id,
+          company: row.posting.company,
+          title: row.posting.title,
+          email: null,
+          contactUrl: null,
+          method: null,
+        });
+        continue;
+      }
     }
 
-    for (const row of afterLangSearch) {
-      const contacts = map.get(row.posting.company) ?? [];
-      const best = pickBestContact(contacts);
-      if (best) {
-        try {
-          await memory.upsertContact({
-            postingId: row.posting.id,
-            email: best.email,
-            sourceType: best.sourceType,
-            confidence: best.confidence.toFixed(2),
-          });
-          found++;
-          results.push({
-            postingId: row.posting.id,
-            company: row.posting.company,
-            title: row.posting.title,
-            email: best.email,
-            method: "grok",
-          });
-          continue;
-        } catch {
-          /* fall through to skip */
-        }
-      }
-      await markPostingSkipped(row.posting.id);
-      results.push({
-        postingId: row.posting.id,
-        company: row.posting.company,
-        title: row.posting.title,
-        email: null,
-        method: null,
-      });
-    }
-  } else {
-    for (const row of afterLangSearch) {
-      await markPostingSkipped(row.posting.id);
-      results.push({
-        postingId: row.posting.id,
-        company: row.posting.company,
-        title: row.posting.title,
-        email: null,
-        method: null,
-      });
-    }
+    results.push({
+      postingId: row.posting.id,
+      company: row.posting.company,
+      title: row.posting.title,
+      email: best.email,
+      contactUrl: best.contactUrl ?? null,
+      method: methodForContact(best),
+    });
   }
 
   return { attempted: jobs.length, found, results };
 }
 
-/**
- * Two-phase discovery so we hit Grok in groups of 5:
- *   1. Cheap pass — pull any email already in the posting body.
- *   2. For remaining jobs, ask Grok in batches of 5 (concurrent).
- *   3. For anything Grok still couldn't find, fall back to the per-posting
- *      chain (on-site scrape → DDG homepage → DDG snippets → pattern guess).
- */
 export async function discoverContactsForTopJobs(
   limit: number
 ): Promise<number> {
   const jobs = await memory.listTopRelevantWithoutContacts(limit);
   if (jobs.length === 0) return 0;
 
-  let discovered = 0;
-  const stillMissing: typeof jobs = [];
-
-  // Phase 1: body emails (no network).
-  for (const row of jobs) {
-    const fromBody = discoverFromBody(row.posting.description);
-    const best = pickBestContact(fromBody);
-    if (best) {
-      try {
-        await memory.upsertContact({
-          postingId: row.posting.id,
-          email: best.email,
-          sourceType: best.sourceType,
-          confidence: best.confidence.toFixed(2),
-        });
-        discovered++;
-      } catch (e) {
-        await logEvent("warn", "Body-email upsert failed", {
-          postingId: row.posting.id,
-          error: e instanceof Error ? e.message : String(e),
-        });
-        stillMissing.push(row);
-      }
-    } else {
-      stillMissing.push(row);
-    }
-  }
-
-  // Phase 2: Grok batches of GROK_LOOKUP_BATCH_SIZE.
-  const grokUnresolved: typeof stillMissing = [];
-  if (isGrokConfigured() && stillMissing.length > 0) {
-    const batches: Array<typeof stillMissing> = [];
-    for (let i = 0; i < stillMissing.length; i += GROK_LOOKUP_BATCH_SIZE) {
-      batches.push(stillMissing.slice(i, i + GROK_LOOKUP_BATCH_SIZE));
-    }
-
-    const batchOutcomes = await withConcurrency(
-      batches,
-      CONTACT_DISCOVERY_CONCURRENCY,
-      async (batch) => {
-        const inputs = batch.map(({ posting }) => ({
-          company: posting.company,
-          jobTitle: posting.title,
-          jobUrl: posting.url,
-        }));
-        try {
-          const map = await discoverViaGrokBatch(inputs);
-          await logEvent("info", "Grok contact batch processed", {
-            batchSize: batch.length,
-            matched: map.size,
-          });
-          return { batch, map };
-        } catch (error) {
-          await logEvent("warn", "Grok contact batch failed", {
-            batchSize: batch.length,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return { batch, map: new Map<string, DiscoveredContact[]>() };
-        }
-      }
-    );
-
-    for (const { batch, map } of batchOutcomes) {
-      for (const row of batch) {
-        const contacts = map.get(row.posting.company) ?? [];
-        const best = pickBestContact(contacts);
-        if (!best) {
-          grokUnresolved.push(row);
-          continue;
-        }
-        try {
-          await memory.upsertContact({
-            postingId: row.posting.id,
-            email: best.email,
-            sourceType: best.sourceType,
-            confidence: best.confidence.toFixed(2),
-          });
-          discovered++;
-        } catch (e) {
-          await logEvent("warn", "Grok contact upsert failed", {
-            postingId: row.posting.id,
-            error: e instanceof Error ? e.message : String(e),
-          });
-          grokUnresolved.push(row);
-        }
-      }
-    }
-  } else {
-    grokUnresolved.push(...stillMissing);
-  }
-
-  // Phase 3: per-posting fallback chain (on-site / DDG / pattern). Skips Grok
-  // internally since callers already tried it above.
-  const fallbackResults = await withConcurrency(
-    grokUnresolved,
+  const outcomes = await withConcurrency(
+    jobs,
     CONTACT_DISCOVERY_CONCURRENCY,
     async ({ posting }) => {
+      let best: DiscoveredContact;
       try {
-        const contacts = await discoverContactsForPosting(
-          {
-            description: posting.description,
-            url: posting.url,
-            company: posting.company,
-          },
-          // Already tried Grok in the batch phase; don't double-pay.
-          { skipGrok: true }
-        );
-        const best = pickBestContact(contacts);
-        if (!best) return false;
-        await memory.upsertContact({
+        best = await discoverBestForPosting(posting);
+      } catch (error) {
+        await logEvent("warn", "Contact discovery failed; saving posting URL", {
           postingId: posting.id,
-          email: best.email,
-          sourceType: best.sourceType,
-          confidence: best.confidence.toFixed(2),
+          company: posting.company,
+          error: error instanceof Error ? error.message : String(error),
         });
+        best = postingUrlOnlyContact(posting.url);
+      }
+
+      try {
+        await persistDiscoveredContact(posting.id, best);
         return true;
       } catch (error) {
-        await logEvent("warn", "Fallback contact discovery failed", {
+        await logEvent("warn", "Contact upsert failed", {
           postingId: posting.id,
           company: posting.company,
           error: error instanceof Error ? error.message : String(error),
@@ -367,9 +178,8 @@ export async function discoverContactsForTopJobs(
       }
     }
   );
-  discovered += fallbackResults.filter(Boolean).length;
 
-  return discovered;
+  return outcomes.filter(Boolean).length;
 }
 
 export async function draftEmailsForContacts(
@@ -380,8 +190,10 @@ export async function draftEmailsForContacts(
   let drafted = 0;
 
   for (const { contact, posting, filtered } of rows) {
+    if (!contact.email) continue;
+    const recipientEmail = contact.email;
     const inputHash = sha256Hex(
-      `${posting.id}:${contact.email}:${filtered.fitReason}`
+      `${posting.id}:${recipientEmail}:${filtered.fitReason}`
     );
     const cached = await memory.getCachedLlm(env.OPENAI_DRAFT_MODEL, inputHash);
     let draft = cached ? parseDraftedEmail(cached) : null;
@@ -396,7 +208,7 @@ export async function draftEmailsForContacts(
             company: posting.company,
             fitReason: filtered.fitReason ?? "",
             roleCategory: filtered.roleCategory ?? "engineering",
-            recipientEmail: contact.email,
+            recipientEmail,
           }),
           jsonSchema: draftedEmailJsonSchema as Record<string, unknown>,
         });
@@ -445,9 +257,17 @@ export async function sendApprovedEmails(
   let failed = 0;
 
   for (const { email, contact } of pending) {
+    if (!contact.email) {
+      await memory.updateOutreachStatus(email.id, "failed", {
+        errorMessage: "Contact has no email address",
+      });
+      failed++;
+      continue;
+    }
+    const recipientEmail = contact.email;
     const confidence = Number(contact.confidence);
     const guard = await runAllGuardrails({
-      recipientEmail: contact.email,
+      recipientEmail,
       subject: email.subject,
       body: email.body,
       llmOutput: { subject: email.subject, body: email.body },
@@ -470,7 +290,7 @@ export async function sendApprovedEmails(
 
     try {
       const result = await sendEmail({
-        to: contact.email,
+        to: recipientEmail,
         subject: email.subject,
         body: email.body,
         dryRun,
@@ -482,7 +302,7 @@ export async function sendApprovedEmails(
       });
 
       if (!dryRun) {
-        const domain = contact.email.split("@")[1] ?? "";
+        const domain = recipientEmail.split("@")[1] ?? "";
         await memory.recordDomainSend(domain);
       }
 
@@ -507,10 +327,15 @@ export async function sendSingleOutreach(
   if (!row) return { ok: false, reason: "Not found" };
 
   const { email, contact } = row;
+  if (!contact.email) {
+    return { ok: false, reason: "Contact has no email address" };
+  }
+
+  const recipientEmail = contact.email;
   const confidence = Number(contact.confidence);
 
   const guard = await runAllGuardrails({
-    recipientEmail: contact.email,
+    recipientEmail,
     subject: email.subject,
     body: email.body,
     llmOutput: { subject: email.subject, body: email.body },
@@ -525,7 +350,7 @@ export async function sendSingleOutreach(
   }
 
   const result = await sendEmail({
-    to: contact.email,
+    to: recipientEmail,
     subject: email.subject,
     body: email.body,
     dryRun,
@@ -537,7 +362,7 @@ export async function sendSingleOutreach(
   });
 
   if (!dryRun) {
-    const domain = contact.email.split("@")[1] ?? "";
+    const domain = recipientEmail.split("@")[1] ?? "";
     await memory.recordDomainSend(domain);
   }
 

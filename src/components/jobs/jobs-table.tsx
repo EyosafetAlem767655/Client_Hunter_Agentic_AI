@@ -22,6 +22,7 @@ export interface JobRow {
   url: string;
   scrapedAt?: string | null;
   contactEmail?: string | null;
+  contactUrl?: string | null;
 }
 
 function relativeTime(iso: string): string {
@@ -74,6 +75,16 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
                     <span className="rounded bg-amber-200 px-2 py-0.5 text-amber-900">
                       {job.contactEmail}
                     </span>
+                  ) : job.contactUrl ? (
+                    <a
+                      href={job.contactUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded bg-orange-100 px-2 py-0.5 text-orange-900 hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      URL only
+                    </a>
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
