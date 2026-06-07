@@ -105,7 +105,30 @@ describe("LangSearch contact discovery", () => {
     ]);
   });
 
-  it("returns no contact when LangSearch yields no usable company URL", async () => {
+  it("falls back to the raw LangSearch URL when the LLM filter rejects every candidate", async () => {
+    // The LLM threw out every candidate but LangSearch still returned URLs —
+    // keep one as a url_only contact so the discovery row is never empty.
+    mocks.filterContactUrls.mockResolvedValue([]);
+    const { discoverViaLangSearch } = await import("@/lib/contact/discovery");
+
+    const out = await discoverViaLangSearch("CRAE GROUP LTD", {
+      url: "https://jobboard.example/jobs/1",
+    });
+
+    expect(out).toEqual([
+      {
+        email: null,
+        contactUrl: "https://www.craegroup.com/contact",
+        sourceType: "url_only",
+        confidence: 0.3,
+      },
+    ]);
+    // We didn't waste a scrape on a URL the LLM rejected.
+    expect(mocks.scrapeContactPages).not.toHaveBeenCalled();
+  });
+
+  it("returns no contact when LangSearch returns nothing at all", async () => {
+    mocks.findContactUrls.mockResolvedValue([]);
     mocks.filterContactUrls.mockResolvedValue([]);
     const { discoverContactsForPosting } = await import("@/lib/contact/discovery");
 

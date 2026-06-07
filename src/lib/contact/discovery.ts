@@ -1,7 +1,7 @@
 import { env } from "@/lib/env";
 import { assertAllowedUrl } from "@/lib/scrapers/base";
 import { logEvent } from "@/lib/agent/observability";
-import { findContactUrls } from "@/lib/langsearch/client";
+import { findContactUrls, type LangSearchUrlResult } from "@/lib/langsearch/client";
 import { filterContactUrls } from "./url-filter";
 import {
   scrapeContactPages,
@@ -268,10 +268,11 @@ export async function discoverViaLangSearch(
   }
 
   void posting;
+  let rawResults: LangSearchUrlResult[] = [];
   let candidateUrls: string[] = [];
   try {
-    const results = await findContactUrls(normalizedCompany);
-    candidateUrls = await filterContactUrls(normalizedCompany, results);
+    rawResults = await findContactUrls(normalizedCompany);
+    candidateUrls = await filterContactUrls(normalizedCompany, rawResults);
   } catch (e) {
     await logEvent("warn", "LangSearch URL discovery failed", {
       company: normalizedCompany,
@@ -279,7 +280,15 @@ export async function discoverViaLangSearch(
     });
   }
 
+  // Per spec: "by any means, empty contact list is not allowed". If the
+  // LLM URL filter rejected every candidate but LangSearch did return
+  // something, keep the first raw URL anyway — a contact URL the human
+  // can follow up on is better than no row at all.
   if (candidateUrls.length === 0) {
+    const fallbackUrl = firstHttpUrl(rawResults);
+    if (fallbackUrl) {
+      return [urlOnlyContact(fallbackUrl, 0.3)];
+    }
     return [];
   }
 
@@ -289,6 +298,15 @@ export async function discoverViaLangSearch(
   if (emailContacts.length > 0) return emailContacts;
 
   return [urlOnlyContact(sourceUrl, 0.4)];
+}
+
+function firstHttpUrl(results: LangSearchUrlResult[]): string | null {
+  for (const item of results) {
+    if (item?.url && typeof item.url === "string" && item.url.startsWith("http")) {
+      return item.url;
+    }
+  }
+  return null;
 }
 
 async function scrapeAndExtract(
