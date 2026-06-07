@@ -4,41 +4,54 @@ import { logEvent } from "@/lib/agent/observability";
 import type { LangSearchUrlResult } from "@/lib/langsearch/client";
 
 interface UrlFilterResult {
-  urls: string[];
+  /** The single URL the LLM picked as the contact page. */
+  url: string | null;
 }
 
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    urls: {
-      type: "array",
-      items: { type: "string" },
-      maxItems: 3,
-    },
+    url: { type: ["string", "null"] },
   },
-  required: ["urls"],
+  required: ["url"],
 } as const;
 
-const SYSTEM_PROMPT = `You are picking the URL(s) most likely to surface a \
-contact email for a given company. Be liberal — when in doubt, KEEP a \
-candidate rather than throw it away. You have freedom to use your own \
-judgement.
+/**
+ * Tight prompt: the LLM only gets candidates that already mention
+ * "contact" or "apply" in their URL/title/snippet/summary. Its job is
+ * just to pick the best of those — not to discover URLs from scratch.
+ * This kills the hallucination cases (the model previously returned
+ * gibberish URLs when given too much freedom).
+ */
+const SYSTEM_PROMPT = `You pick the ONE best URL for finding a company's \
+contact email. The candidates have already been narrowed down to URLs \
+that mention "contact" or "apply" somewhere in their title, snippet, or \
+URL path.
 
-Strong signals to keep a URL:
-- The host is (or looks like) the company's own domain.
-- The path ends with /contact, /contact-us, /contacts, /apply, /careers, \
-/jobs, /about, /about-us, /team, /support, /press, or a similar contact / \
-careers-style path.
-- The page title or snippet mentions reaching out, hiring, careers, or \
-emailing the company.
+Rules:
+- Return ONE url, picked verbatim from the candidates list. Do NOT \
+invent, edit, or paraphrase a URL.
+- Strongly prefer paths ending in /contact, /contact-us, /apply, \
+/careers, /jobs, /about, /team, /support.
+- Prefer the company's own domain over third-party listings.
+- Reject obvious wrong-company matches (the URL is for a different \
+business than the one searched).
+- If none of the candidates plausibly belong to the company being \
+searched, return null.`;
 
-Reject only when a URL clearly belongs to a different company than the \
-one being searched. Job boards, ATS pages, and directories should be a \
-last resort but are still OK to return if nothing better exists.
-
-Return only URLs that appeared verbatim in the candidates. Return up to \
-three URLs, best first.`;
+/** Keywords that mean a candidate is worth showing to the LLM at all. */
+const CONTACT_KEYWORDS = [
+  "contact",
+  "apply",
+  "career",
+  "careers",
+  "hiring",
+  "recruit",
+  "/jobs",
+  "team",
+  "about",
+];
 
 const BLOCKED_HOST_PARTS = [
   "linkedin.com",
@@ -50,25 +63,65 @@ const BLOCKED_HOST_PARTS = [
   "workable.com",
 ];
 
+/**
+ * Three-step pipeline:
+ *   1. Deterministic pre-filter on "contact" / "apply" keywords. Anything
+ *      that doesn't mention these gets dropped before the LLM ever sees it
+ *      — prevents the model from hallucinating gibberish URLs because
+ *      every option in its context is already plausible.
+ *   2. LLM picks the single best URL from the curated list.
+ *   3. We validate the LLM's pick against the allowed-set (verbatim
+ *      match) so a hallucinated URL is rejected even if it slips through.
+ * Fallback to deterministic scoring when the LLM can't pick or returns
+ * something invalid.
+ */
 export async function filterContactUrls(
   company: string,
   candidates: LangSearchUrlResult[]
 ): Promise<string[]> {
+  if (candidates.length === 0) return [];
+
   const allowed = uniqueCandidateUrls(candidates);
   if (allowed.length === 0) return [];
+  const allowedSet = new Set(allowed);
 
+  // Step 1: keyword pre-filter. Pull the candidates whose URL, title,
+  // snippet, or summary actually mentions a contact-style keyword.
+  const keywordHits = candidates.filter((candidate) =>
+    candidateMentionsContactKeyword(candidate)
+  );
+
+  // No candidate even mentions "contact"/"apply"/etc. Don't waste an LLM
+  // call on a list it'll likely hallucinate from — fall straight through
+  // to deterministic scoring.
+  if (keywordHits.length === 0) {
+    return fallbackContactUrls(company, candidates);
+  }
+
+  // Step 2: LLM picks one URL from the curated list. We send only the
+  // sentences that contain the keyword indicators so the model can't
+  // wander off into URLs we don't trust.
   try {
     const result = await callOpenAIJson<UrlFilterResult>({
       model: env.OPENAI_URL_FILTER_MODEL,
       system: SYSTEM_PROMPT,
-      user: buildUserPrompt(company, candidates),
+      user: buildUserPrompt(company, keywordHits),
       jsonSchema: SCHEMA as unknown as Record<string, unknown>,
     });
-    const allowedSet = new Set(allowed);
-    const filtered = Array.isArray(result.urls)
-      ? result.urls.filter((url) => allowedSet.has(url)).slice(0, 3)
-      : [];
-    if (filtered.length > 0) return filtered;
+    const picked =
+      typeof result.url === "string" ? normalizeUrl(result.url) : null;
+    // Step 3: hard-validate against the allowed set. A hallucinated URL
+    // never reaches the scraper.
+    if (picked && allowedSet.has(picked)) {
+      return [picked];
+    }
+    if (picked) {
+      await logEvent("warn", "LLM URL filter returned out-of-set URL", {
+        company,
+        picked,
+        candidateCount: keywordHits.length,
+      });
+    }
   } catch (e) {
     await logEvent("warn", "LLM URL filter failed", {
       company,
@@ -76,7 +129,49 @@ export async function filterContactUrls(
     });
   }
 
-  return fallbackContactUrls(company, candidates);
+  // Deterministic fallback — score the keyword-hit candidates ourselves.
+  // Note we score the FILTERED list, not the original, so we never
+  // surface a URL the LLM was also denied.
+  return fallbackContactUrls(company, keywordHits);
+}
+
+/** Does this candidate mention a contact / apply / careers keyword anywhere? */
+function candidateMentionsContactKeyword(
+  candidate: LangSearchUrlResult
+): boolean {
+  const haystack = [
+    candidate.url,
+    candidate.displayUrl,
+    candidate.title,
+    candidate.snippet,
+    candidate.summary,
+  ]
+    .filter((part): part is string => typeof part === "string")
+    .join(" ")
+    .toLowerCase();
+  return CONTACT_KEYWORDS.some((keyword) => haystack.includes(keyword));
+}
+
+/**
+ * Pull only the sentences from snippet/summary that actually mention a
+ * contact keyword. Keeps the LLM prompt small and on-topic.
+ */
+function relevantSentences(candidate: LangSearchUrlResult): string[] {
+  const blob = [candidate.snippet, candidate.summary]
+    .filter((part): part is string => typeof part === "string")
+    .join(" ");
+  if (!blob) return [];
+  // Split on common boundaries (newline, period, semicolon, |, ·) so each
+  // sentence-ish chunk is independent.
+  const chunks = blob
+    .split(/[\n.;|·]+/)
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0);
+  const matches = chunks.filter((chunk) => {
+    const lower = chunk.toLowerCase();
+    return CONTACT_KEYWORDS.some((keyword) => lower.includes(keyword));
+  });
+  return matches.slice(0, 4).map((s) => (s.length > 320 ? s.slice(0, 320) : s));
 }
 
 export function fallbackContactUrls(
@@ -103,18 +198,24 @@ function buildUserPrompt(
 ): string {
   return [
     `Company: ${company}`,
-    "Candidates:",
-    ...candidates.slice(0, 8).map((candidate, i) =>
-      [
+    "Candidates (every entry already mentions a contact-style keyword):",
+    ...candidates.slice(0, 8).map((candidate, i) => {
+      const sentences = relevantSentences(candidate);
+      const lines = [
         `${i + 1}. ${candidate.title}`,
         `URL: ${candidate.url}`,
         `Display URL: ${candidate.displayUrl}`,
-        `Snippet: ${candidate.snippet.slice(0, 500)}`,
-        `Summary: ${candidate.summary.slice(0, 900)}`,
-      ].join("\n")
-    ),
+      ];
+      if (sentences.length > 0) {
+        lines.push("Matched sentences:");
+        for (const sentence of sentences) {
+          lines.push(`  - ${sentence}`);
+        }
+      }
+      return lines.join("\n");
+    }),
     "",
-    "Return JSON: { urls: [best candidate URLs] }",
+    "Return JSON: { url: <best candidate URL or null> }",
   ].join("\n\n");
 }
 
@@ -174,9 +275,6 @@ function scoreCandidate(
   if (path.includes("about")) score += 20;
   if (path.includes("team") || path.includes("support")) score += 15;
   if (path === "/" || path === "") score += 5;
-  // `jobs.` subdomain on the company's own domain often hosts the ATS;
-  // mildly downgrade but don't bury — sometimes it's the only page that
-  // exposes a careers email.
   if (hostname.startsWith("jobs.")) score -= 10;
   if (BLOCKED_HOST_PARTS.some((blocked) => hostname.includes(blocked))) {
     score -= 100;
