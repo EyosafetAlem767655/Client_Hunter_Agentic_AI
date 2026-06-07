@@ -23,15 +23,10 @@ interface LangSearchWebResponse {
   results?: LangSearchUrlResult[];
 }
 
+const LANGSEARCH_ENDPOINT = "https://api.langsearch.com/v1/web-search";
+
 export function isLangSearchConfigured(): boolean {
   return Boolean(env.LANGSEARCH_API_KEY);
-}
-
-function appBaseUrl(): string {
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
-  }
-  return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 }
 
 export function parseLangSearchWebResults(
@@ -68,29 +63,49 @@ export function parseLangSearchWebResults(
   return results;
 }
 
+/**
+ * Search LangSearch for likely contact-page URLs for a company. Calls the
+ * LangSearch HTTPS endpoint directly — no Python middleman — because the
+ * self-call to `/api/py/langsearch_urls` on Vercel was failing
+ * intermittently (auth between functions, cold-start, VERCEL_URL quirks)
+ * even though the same `requests.post(...)` call works fine in Colab.
+ *
+ * Mirrors the user's verified Python snippet exactly:
+ *   - URL: https://api.langsearch.com/v1/web-search
+ *   - Authorization header: raw API key (no "Bearer " prefix)
+ *   - Body: { query: f"contact us URL for {company}", freshness: "noLimit",
+ *            summary: true, count: 5 }
+ */
 export async function findContactUrls(
   company: string,
   options: { count?: number; timeoutMs?: number } = {}
 ): Promise<LangSearchUrlResult[]> {
-  if (!env.LANGSEARCH_API_KEY) return [];
-  if (!company || company.trim().length < 2) return [];
+  const apiKey = env.LANGSEARCH_API_KEY?.trim();
+  if (!apiKey) return [];
+  const normalizedCompany = company?.trim();
+  if (!normalizedCompany || normalizedCompany.length < 2) return [];
 
   const controller = new AbortController();
   const timeout = setTimeout(
-    () => controller.abort(new Error("LangSearch URL request timeout")),
-    options.timeoutMs ?? 20_000
+    () => controller.abort(new Error("LangSearch request timeout")),
+    options.timeoutMs ?? 15_000
   );
 
   try {
-    const res = await fetch(`${appBaseUrl()}/api/py/langsearch_urls`, {
+    const res = await fetch(LANGSEARCH_ENDPOINT, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.CRON_SECRET}`,
+        // LangSearch accepts the raw key (matches the user's reference
+        // snippet). Some keys ship with a `sk-` prefix already; we don't
+        // add `Bearer ` because their docs and the working code don't.
+        Authorization: apiKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        company: company.trim(),
-        count: options.count ?? 5,
+        query: `contact us URL for ${normalizedCompany}`,
+        freshness: "noLimit",
+        summary: true,
+        count: Math.max(1, Math.min(options.count ?? 5, 10)),
       }),
       signal: controller.signal,
     });

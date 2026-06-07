@@ -14,8 +14,6 @@ afterEach(() => {
 describe("LangSearch contact URL client", () => {
   beforeEach(() => {
     process.env.LANGSEARCH_API_KEY = "sk-langsearch-test";
-    process.env.CRON_SECRET = "test-cron-secret";
-    process.env.NEXT_PUBLIC_APP_URL = "https://app.example";
     vi.resetModules();
   });
 
@@ -59,20 +57,24 @@ describe("LangSearch contact URL client", () => {
     ]);
   });
 
-  it("calls the Python LangSearch route and returns normalized URL results", async () => {
+  it("calls the LangSearch API directly and returns normalized URL results", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({
-        results: [
-          {
-            title: "Contact",
-            url: "https://www.craegroup.com/contact",
-            displayUrl: "craegroup.com/contact",
-            snippet: "Contact us",
-            summary: "Email and enquiry details.",
+        data: {
+          webPages: {
+            value: [
+              {
+                name: "Contact",
+                url: "https://www.craegroup.com/contact",
+                displayUrl: "craegroup.com/contact",
+                snippet: "Contact us",
+                summary: "Email and enquiry details.",
+              },
+            ],
           },
-        ],
+        },
       }),
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -82,17 +84,24 @@ describe("LangSearch contact URL client", () => {
 
     expect(out[0]?.url).toBe("https://www.craegroup.com/contact");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Calls LangSearch directly — no Python middleman, no Vercel self-call.
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "https://app.example/api/py/langsearch_urls"
+      "https://api.langsearch.com/v1/web-search"
     );
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(init.method).toBe("POST");
-    expect(init.headers).toMatchObject({
-      Authorization: "Bearer test-cron-secret",
-      "Content-Type": "application/json",
-    });
+    // Raw API key, no "Bearer " — matches LangSearch's reference snippet.
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "sk-langsearch-test"
+    );
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/json"
+    );
+    // Body includes the company name interpolated into the query string.
     expect(JSON.parse(init.body as string)).toEqual({
-      company: "CRAE GROUP LTD",
+      query: "contact us URL for CRAE GROUP LTD",
+      freshness: "noLimit",
+      summary: true,
       count: 5,
     });
   });

@@ -139,8 +139,9 @@ export const env: Env = loadEnv();
 export const CRON_EMAIL_LIMIT = 30;
 export const CRON_POSTING_LIMIT = 150;
 export const DOMAIN_RATE_LIMIT_DAYS = 30;
-// Larger batches = fewer LLM round-trips; the JSON-mode response fits 12 easily.
-export const FILTER_BATCH_SIZE = 12;
+// Smaller batches keep individual OpenAI calls fast (<15 s) so the filter
+// stays inside Vercel's 60 s function ceiling even with one retry.
+export const FILTER_BATCH_SIZE = 8;
 // How many filter / discovery operations to fan out at once. Vercel Hobby has
 // a 60s function ceiling, so sequential per-posting work blows the budget on
 // 100+ scraped jobs. Parallelism keeps the whole pipeline under the limit.

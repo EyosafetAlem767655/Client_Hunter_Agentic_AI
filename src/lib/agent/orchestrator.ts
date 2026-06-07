@@ -109,8 +109,11 @@ export async function runScrapePipelineFromPostings(
           options.filterLimit ?? CRON_POSTING_LIMIT,
           {
             maxBatches: options.filterMaxBatches ?? 2,
-            llmTimeoutMs: 15_000,
-            llmMaxRetries: 1,
+            // 20 s timeout × 2 retries fits two batches into the 55 s pipeline
+            // budget; the previous 15 s × 1 retry was failing on slow OpenAI
+            // structured-output responses.
+            llmTimeoutMs: 20_000,
+            llmMaxRetries: 2,
           }
         )
       : { processed: 0, succeeded: 0, newMatches: [] };
