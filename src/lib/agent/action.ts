@@ -159,6 +159,10 @@ export async function discoverNextContacts(limit: number): Promise<{
   }
 
   // Grok the rest in ONE small batch (≤ slot size, so ≤ 5 by construction).
+  // Anything Grok can't resolve gets marked as skipped — the previous
+  // "fallback chain" (DDG + on-site crawl + pattern guess) fanned out
+  // into dozens of HTTP fetches per posting and was the main cause of
+  // the /api/manual/discover/next 504s.
   if (afterLangSearch.length > 0 && isGrokConfigured()) {
     const inputs = afterLangSearch.map(({ posting }) => ({
       company: posting.company,
@@ -175,7 +179,6 @@ export async function discoverNextContacts(limit: number): Promise<{
       });
     }
 
-    const grokMissed: typeof afterLangSearch = [];
     for (const row of afterLangSearch) {
       const contacts = map.get(row.posting.company) ?? [];
       const best = pickBestContact(contacts);
@@ -195,70 +198,22 @@ export async function discoverNextContacts(limit: number): Promise<{
             email: best.email,
             method: "grok",
           });
+          continue;
         } catch {
-          grokMissed.push(row);
+          /* fall through to skip */
         }
-      } else {
-        grokMissed.push(row);
       }
-    }
-
-    // Fallback chain for anything Grok still couldn't resolve.
-    for (const row of grokMissed) {
-      try {
-        const contacts = await discoverContactsForPosting(
-          {
-            description: row.posting.description,
-            url: row.posting.url,
-            company: row.posting.company,
-          },
-          { skipGrok: true }
-        );
-        const best = pickBestContact(contacts);
-        if (best) {
-          await memory.upsertContact({
-            postingId: row.posting.id,
-            email: best.email,
-            sourceType: best.sourceType,
-            confidence: best.confidence.toFixed(2),
-          });
-          found++;
-          results.push({
-            postingId: row.posting.id,
-            company: row.posting.company,
-            title: row.posting.title,
-            email: best.email,
-            method: "fallback",
-          });
-        } else {
-          await markPostingSkipped(row.posting.id);
-          results.push({
-            postingId: row.posting.id,
-            company: row.posting.company,
-            title: row.posting.title,
-            email: null,
-            method: null,
-          });
-        }
-      } catch (e) {
-        await logEvent("warn", "discoverNext: fallback failed", {
-          postingId: row.posting.id,
-          error: e instanceof Error ? e.message : String(e),
-        });
-        await markPostingSkipped(row.posting.id);
-        results.push({
-          postingId: row.posting.id,
-          company: row.posting.company,
-          title: row.posting.title,
-          email: null,
-          method: null,
-        });
-      }
+      await markPostingSkipped(row.posting.id);
+      results.push({
+        postingId: row.posting.id,
+        company: row.posting.company,
+        title: row.posting.title,
+        email: null,
+        method: null,
+      });
     }
   } else {
     for (const row of afterLangSearch) {
-      // No Grok available and no body / LangSearch hit — mark as skipped so
-      // the pending queue advances on the next loop iteration.
       await markPostingSkipped(row.posting.id);
       results.push({
         postingId: row.posting.id,

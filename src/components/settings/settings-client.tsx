@@ -373,10 +373,10 @@ export function SettingsClient({
     <div className="space-y-6">
       {toast && (
         <div
-          className={`fixed right-6 top-20 z-50 flex max-w-md items-center gap-2 rounded-lg border px-4 py-3 shadow-2xl backdrop-blur-md ${
+          className={`fixed right-6 top-20 z-50 flex max-w-md items-center gap-2 rounded-lg border px-4 py-3 shadow-2xl ${
             toast.kind === "ok"
-              ? "border-amber-700/40 bg-amber-100/60 text-amber-900"
-              : "border-red-500/40 bg-red-500/10 text-red-200"
+              ? "border-emerald-800 bg-emerald-700 text-white"
+              : "border-red-800 bg-red-700 text-white"
           }`}
         >
           {toast.kind === "ok" ? (

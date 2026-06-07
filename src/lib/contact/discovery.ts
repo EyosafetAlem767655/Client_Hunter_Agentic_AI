@@ -481,18 +481,20 @@ function extractUrlsFromText(text: string): string[] {
 }
 
 /**
- * Fetch each URL (plus a few standard contact-style sub-paths on each
- * origin), regex-extract emails, and return them in discovery order.
- * Mirrors the user's reference snippet: `requests.get(url)` + email regex.
+ * Per the user's spec: take the URL Grok returned, hit that page and the
+ * same origin's `/contact` variant, regex-extract emails. No deep crawl
+ * — that path used to fan out to 80+ requests per company and 504 the
+ * Vercel function. Stops on the first usable email.
  */
 async function scrapeEmailsFromUrls(urls: string[]): Promise<string[]> {
   const ordered: string[] = [];
   const seenEmails = new Set<string>();
   const seenUrls = new Set<string>();
 
-  // Expand each URL into the URL itself + a few standard contact paths.
+  // Only the URL itself + same-origin `/contact` and `/contact-us`. Anything
+  // more makes the worst-case wall-time blow past the 60 s Vercel ceiling.
   const candidates: string[] = [];
-  for (const url of urls.slice(0, 6)) {
+  for (const url of urls.slice(0, 3)) {
     try {
       assertAllowedUrl(url);
     } catch {
@@ -504,12 +506,7 @@ async function scrapeEmailsFromUrls(urls: string[]): Promise<string[]> {
     } catch {
       continue;
     }
-    if (!seenUrls.has(url)) {
-      seenUrls.add(url);
-      candidates.push(url);
-    }
-    for (const path of COMPANY_PATHS) {
-      const candidate = `${origin}${path}`;
+    for (const candidate of [url, `${origin}/contact`, `${origin}/contact-us`]) {
       if (seenUrls.has(candidate)) continue;
       seenUrls.add(candidate);
       candidates.push(candidate);
@@ -524,7 +521,7 @@ async function scrapeEmailsFromUrls(urls: string[]): Promise<string[]> {
         seenEmails.add(email);
         ordered.push(email);
       }
-      if (ordered.length >= 3) break;
+      if (ordered.length >= 2) break;
     } catch {
       continue;
     }
@@ -610,7 +607,7 @@ async function defaultFetch(url: string): Promise<string> {
       Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "en-US,en;q=0.9",
     },
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(6_000),
     redirect: "follow",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
