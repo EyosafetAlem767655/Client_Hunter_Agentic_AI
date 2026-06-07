@@ -514,8 +514,8 @@ export function SettingsClient({
           <p className="text-sm text-muted-foreground">
             Walks through every relevant job that still needs a contact and
             asks Grok (model{" "}
-            <code className="rounded bg-muted px-1 font-mono">grok-4-fast-reasoning</code>
-            ) for the company&apos;s email — one at a time, with a{" "}
+            <code className="rounded bg-muted px-1 font-mono">grok-4.3</code>
+            ) for the company&apos;s contact page — one at a time, with a{" "}
             <strong>30-second rest</strong> between calls. Each request
             finishes well under 60 s so it never trips the Vercel Hobby
             timeout. <strong>Runs automatically 60 s after a scrape;</strong>{" "}

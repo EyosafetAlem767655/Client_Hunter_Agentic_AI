@@ -273,15 +273,7 @@ function safeHost(url: string): string | null {
   }
 }
 
-interface GrokUrlResult {
-  /** URL of the company's contact / contact-us page. */
-  contact_url: string | null;
-  /** Optional homepage URL — used as a fallback if the contact page 404s. */
-  url?: string | null;
-}
-
-const GROK_SYSTEM_PROMPT = `You are a fast web researcher. Find the URL of \
-the "Contact us" page on a company's official website. Return JSON only.`;
+const GROK_SYSTEM_PROMPT = "You are Grok.";
 
 /**
  * Ask Grok specifically for the "Contact us" page URL of a company, then
@@ -295,22 +287,17 @@ export async function discoverViaGrok(
   posting?: { title?: string; url?: string }
 ): Promise<DiscoveredContact[]> {
   if (!isGrokConfigured()) return [];
-  if (!company || company.trim().length < 2) return [];
+  const normalizedCompany = company.trim();
+  if (!normalizedCompany || normalizedCompany.length < 2) return [];
 
   void posting;
-  const userPrompt =
-    `Find the "Contact us" page URL for the company called "${company}".\n\n` +
-    `Return JSON: { "contact_url": "<https URL of the contact page, or null>", ` +
-    `"url": "<https URL of the company's homepage, or null>" }`;
+  const userPrompt = `Search the contact us URL for this company: ${normalizedCompany}`;
 
-  let result: Awaited<ReturnType<typeof callGrokJson<GrokUrlResult>>>;
+  let result: Awaited<ReturnType<typeof callGrokJson<unknown>>>;
   try {
-    result = await callGrokJson<GrokUrlResult>({
+    result = await callGrokJson<unknown>({
       system: GROK_SYSTEM_PROMPT,
       user: userPrompt,
-      searchMode: "on",
-      maxSearchResults: 6,
-      sources: [{ type: "web" }],
       timeoutMs: 25_000,
     });
   } catch (e) {
@@ -323,34 +310,17 @@ export async function discoverViaGrok(
 
   // Contact URL wins over homepage — the LLM extractor sees the contact
   // page first and stops there if it's enough.
-  const candidateUrls = collectCandidateUrls(
-    [result.data?.contact_url ?? null, result.data?.url ?? null],
-    result.raw,
-    result.citations
-  );
+  const candidateUrls = collectCandidateUrls(result.raw, result.citations);
   if (candidateUrls.length === 0) return [];
 
   const emails = await scrapeAndExtract(candidateUrls);
   return scoreGrokEmails(emails);
 }
 
-interface GrokBatchEntry {
-  /** Echo of the input company name so we can match results back. */
-  company: string;
-  contact_url: string | null;
-  url?: string | null;
-}
-
-interface GrokBatchResult {
-  results: GrokBatchEntry[];
-}
-
-const GROK_BATCH_SYSTEM_PROMPT = GROK_SYSTEM_PROMPT;
-
 /**
- * Bulk Grok URL lookup: ask Grok to find the contact page URL for each
- * company in a single request. For every URL Grok returns we call the
- * Python DOM-scrape service, then OpenAI to pick the best email.
+ * Compatibility wrapper for callers that still hand in a batch. Grok itself
+ * is called once per company because the simple prompt matches the behavior
+ * that works in the Grok web UI more reliably than multi-company JSON output.
  */
 export async function discoverViaGrokBatch(
   inputs: Array<{ company: string; jobTitle?: string; jobUrl?: string }>
@@ -369,126 +339,81 @@ export async function discoverViaGrokBatch(
   const deduped = Array.from(byCompany.values());
   if (deduped.length === 0) return out;
 
-  const queries = deduped
-    .map((e) => `Find the "Contact us" page URL for "${e.company}".`)
-    .join("\n");
-  const userPrompt =
-    `${queries}\n\n` +
-    `Return JSON: { "results": [{ "company", "contact_url", "url" }] }`;
-
-  let res: Awaited<ReturnType<typeof callGrokJson<GrokBatchResult>>>;
-  try {
-    res = await callGrokJson<GrokBatchResult>({
-      system: GROK_BATCH_SYSTEM_PROMPT,
-      user: userPrompt,
-      searchMode: "on",
-      maxSearchResults: Math.min(12, deduped.length * 3),
-      sources: [{ type: "web" }],
-      timeoutMs: 22_000,
-    });
-  } catch (e) {
-    await logEvent("warn", "Grok batch HTTP error", {
-      batchSize: deduped.length,
-      error: e instanceof Error ? e.message : String(e),
-    });
-    return out;
-  }
-
-  // Build a per-company list of URLs to scrape: prefer Grok's structured
-  // payload, then fall back to any URLs cited in the raw response for
-  // companies the payload missed.
-  const urlsByCompany = new Map<string, string[]>();
-  const payload = tryParseGrokBatch(res.raw, res.data);
-  const keys = Array.from(byCompany.keys());
-
-  if (payload && Array.isArray(payload.results)) {
-    for (const entry of payload.results) {
-      const rawKey = entry.company?.trim().toLowerCase() ?? "";
-      let inputKey: string | undefined;
-      if (rawKey && byCompany.has(rawKey)) {
-        inputKey = rawKey;
-      } else {
-        for (const key of keys) {
-          if (rawKey && (key.includes(rawKey) || rawKey.includes(key))) {
-            inputKey = key;
-            break;
-          }
-        }
-      }
-      if (!inputKey) continue;
-      const list = urlsByCompany.get(inputKey) ?? [];
-      for (const u of [entry.contact_url, entry.url]) {
-        if (typeof u === "string" && u.startsWith("http")) list.push(u);
-      }
-      urlsByCompany.set(inputKey, list);
-    }
-  }
-
-  // Fall back to citations / bare URLs in the raw text for companies the
-  // structured payload didn't cover. Assign each citation to the company
-  // whose lowercase name appears in the URL.
-  for (const url of [...res.citations, ...extractUrlsFromText(res.raw)]) {
-    if (!url.startsWith("http")) continue;
-    const lowerUrl = url.toLowerCase();
-    for (const key of keys) {
-      const compact = key.replace(/[^a-z0-9]/g, "");
-      if (!compact) continue;
-      if (lowerUrl.includes(compact)) {
-        const list = urlsByCompany.get(key) ?? [];
-        if (!list.includes(url)) list.push(url);
-        urlsByCompany.set(key, list);
-        break;
-      }
-    }
-  }
-
-  // Scrape each company's URLs (Python + Playwright) and let OpenAI
-  // pick the email. Sequential per company so a single slow page can't
-  // monopolise the function budget.
   let matched = 0;
-  for (const [inputKey, urls] of Array.from(urlsByCompany.entries())) {
-    if (urls.length === 0) continue;
-    const emails = await scrapeAndExtract(urls);
-    const contacts = scoreGrokEmails(emails);
+  for (const input of deduped) {
+    const contacts = await discoverViaGrok(input.company, {
+      title: input.jobTitle,
+      url: input.jobUrl,
+    });
     if (contacts.length === 0) continue;
-    const inputCompany = byCompany.get(inputKey)!.company;
-    out.set(inputCompany, contacts);
+    out.set(input.company, contacts);
     matched++;
   }
 
-  await logEvent("info", "Grok batch parsed", {
+  await logEvent("info", "Grok batch compatibility processed", {
     requested: deduped.length,
     matched,
-    hadStructuredPayload: !!payload?.results?.length,
-    citations: res.citations.length,
   });
 
   return out;
 }
 
-function collectCandidateUrls(
-  primary: Array<string | null>,
-  raw: string,
-  citations: string[]
-): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
+function collectCandidateUrls(raw: string, citations: string[]): string[] {
+  const seen = new Map<string, number>();
   const push = (u: string | null | undefined) => {
     if (!u || typeof u !== "string") return;
-    if (!u.startsWith("http")) return;
-    if (seen.has(u)) return;
-    seen.add(u);
-    out.push(u);
+    const normalized = normalizeCandidateUrl(u);
+    if (!normalized || seen.has(normalized)) return;
+    seen.set(normalized, seen.size);
   };
-  for (const u of primary) push(u);
   for (const u of citations) push(u);
   for (const u of extractUrlsFromText(raw)) push(u);
-  return out;
+  return Array.from(seen.entries())
+    .sort(([a, aIndex], [b, bIndex]) => {
+      const rank = rankCandidateUrl(a) - rankCandidateUrl(b);
+      return rank === 0 ? aIndex - bIndex : rank;
+    })
+    .map(([url]) => url);
 }
 
 function extractUrlsFromText(text: string): string[] {
   if (!text) return [];
-  return text.match(/https?:\/\/[^\s"'<>)]+/g) ?? [];
+  return text.match(/https?:\/\/[^\s"'<>)\]]+/g) ?? [];
+}
+
+function normalizeCandidateUrl(raw: string): string | null {
+  const cleaned = raw
+    .trim()
+    .replace(/&amp;/g, "&")
+    .replace(/[.,;!?]+$/g, "");
+  if (!cleaned.startsWith("http")) return null;
+  try {
+    const url = new URL(cleaned);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function rankCandidateUrl(url: string): number {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.toLowerCase();
+    if (path.includes("contact")) return 0;
+    if (
+      path.includes("support") ||
+      path.includes("help") ||
+      path.includes("about")
+    ) {
+      return 1;
+    }
+    if (path === "/" || path === "") return 3;
+    return 2;
+  } catch {
+    return 4;
+  }
 }
 
 /**
@@ -579,28 +504,6 @@ function scoreGrokEmails(ordered: string[]): DiscoveredContact[] {
     });
   }
   return contacts;
-}
-
-function tryParseGrokBatch(
-  raw: string,
-  parsed: GrokBatchResult | null
-): GrokBatchResult | null {
-  if (parsed && Array.isArray(parsed.results)) return parsed;
-  // Some Grok responses arrive with leading prose or a ```json fence. Strip
-  // a fenced block if present and try to JSON-parse the longest balanced
-  // {...} substring.
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const candidate = fenced ? fenced[1] : raw;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end <= start) return null;
-  try {
-    const obj = JSON.parse(candidate.slice(start, end + 1)) as GrokBatchResult;
-    if (obj && Array.isArray(obj.results)) return obj;
-  } catch {
-    /* swallow */
-  }
-  return null;
 }
 
 export function discoverByPatternGuess(

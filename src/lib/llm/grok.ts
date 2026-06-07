@@ -1,34 +1,19 @@
 import { env } from "@/lib/env";
 
 /**
- * Thin wrapper around xAI's chat-completions endpoint, scoped to the one
- * thing we need: a JSON answer backed by live web search.
+ * Thin wrapper around xAI's Responses API web search flow.
  *
- * xAI is OpenAI-API-compatible (https://api.x.ai/v1) but adds a
- * `search_parameters` field that, when set, lets the model run web
- * searches as part of producing its answer. That's exactly what we want
- * for finding the right `careers@` / `hiring@` email of a given company:
- * Grok searches the open web, picks the most credible address, and
- * returns it in the JSON shape we ask for.
- *
- * Reference (verified against xAI docs as of 2026-06):
- *   POST https://api.x.ai/v1/chat/completions
- *   { model, messages, response_format, search_parameters: { mode, ... } }
+ * The contact-discovery path needs Grok to do one thing well: search the web
+ * for a company's Contact us URL. We intentionally do not force JSON output
+ * here because the Grok website behavior the app is matching is a simple web
+ * search prompt, with URLs recovered from response text and citations.
  */
 
-const ENDPOINT = "https://api.x.ai/v1/chat/completions";
+const ENDPOINT = "https://api.x.ai/v1/responses";
 
 export interface GrokSearchRequest {
   system: string;
   user: string;
-  /** "auto" lets Grok decide; "on" forces a search. */
-  searchMode?: "auto" | "on" | "off";
-  /** Cap citations & cost; ~5 sources is usually enough for a contact lookup. */
-  maxSearchResults?: number;
-  /** Restrict to allowed sources (e.g. "web", "x", "news"). */
-  sources?: Array<{ type: "web" | "news" | "x" } & Record<string, unknown>>;
-  /** Tell Grok we want JSON back. */
-  jsonSchema?: Record<string, unknown>;
   /** Override the model, otherwise env.GROK_MODEL. */
   model?: string;
   /** Hard wall on total round-trip time in ms; defaults to 25 s. */
@@ -38,8 +23,26 @@ export interface GrokSearchRequest {
 export interface GrokResponse<T> {
   data: T | null;
   raw: string;
-  /** URLs Grok cited; useful to log + audit which page a contact came from. */
+  /** URLs Grok encountered during web search. */
   citations: string[];
+}
+
+interface XaiResponsesApiResponse {
+  output_text?: string;
+  output?: Array<{
+    type?: string;
+    text?: string;
+    content?: string | Array<{
+      type?: string;
+      text?: string;
+      annotations?: Array<{
+        type?: string;
+        url?: string;
+        url_citation?: { url?: string };
+      }>;
+    }>;
+  }>;
+  citations?: unknown;
 }
 
 export function isGrokConfigured(): boolean {
@@ -55,29 +58,12 @@ export async function callGrokJson<T>(
 
   const body: Record<string, unknown> = {
     model: req.model ?? env.GROK_MODEL,
-    messages: [
+    input: [
       { role: "system", content: req.system },
       { role: "user", content: req.user },
     ],
-    // Force JSON output. xAI honours OpenAI's response_format shape.
-    response_format: req.jsonSchema
-      ? {
-          type: "json_schema",
-          json_schema: {
-            name: "result",
-            schema: req.jsonSchema,
-            strict: true,
-          },
-        }
-      : { type: "json_object" },
-    search_parameters: {
-      mode: req.searchMode ?? "auto",
-      return_citations: true,
-      max_search_results: req.maxSearchResults ?? 5,
-      ...(req.sources ? { sources: req.sources } : {}),
-    },
-    // Keep the answer short — we only need a JSON blob with a few fields.
-    max_tokens: 600,
+    tools: [{ type: "web_search" }],
+    max_output_tokens: 600,
     temperature: 0.1,
   };
 
@@ -107,20 +93,71 @@ export async function callGrokJson<T>(
     throw new Error(`Grok HTTP ${res.status}: ${text.slice(0, 200)}`);
   }
 
-  const json = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-    citations?: string[];
-  };
-  const content = json.choices?.[0]?.message?.content ?? "";
+  const json = (await res.json()) as XaiResponsesApiResponse;
+  const raw = extractResponseText(json);
   let parsed: T | null = null;
   try {
-    parsed = JSON.parse(content) as T;
+    parsed = JSON.parse(raw) as T;
   } catch {
     parsed = null;
   }
+
   return {
     data: parsed,
-    raw: content,
-    citations: Array.isArray(json.citations) ? json.citations : [],
+    raw,
+    citations: extractCitations(json),
   };
+}
+
+function extractResponseText(json: XaiResponsesApiResponse): string {
+  const chunks: string[] = [];
+  if (typeof json.output_text === "string" && json.output_text.trim()) {
+    chunks.push(json.output_text);
+  }
+
+  for (const item of json.output ?? []) {
+    if (typeof item.text === "string" && item.text.trim()) {
+      chunks.push(item.text);
+    }
+    if (typeof item.content === "string" && item.content.trim()) {
+      chunks.push(item.content);
+      continue;
+    }
+    if (!Array.isArray(item.content)) continue;
+    for (const content of item.content) {
+      if (typeof content.text === "string" && content.text.trim()) {
+        chunks.push(content.text);
+      }
+    }
+  }
+
+  return Array.from(new Set(chunks)).join("\n");
+}
+
+function extractCitations(json: XaiResponsesApiResponse): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (url: unknown) => {
+    if (typeof url !== "string") return;
+    if (!url.startsWith("http")) return;
+    if (seen.has(url)) return;
+    seen.add(url);
+    out.push(url);
+  };
+
+  if (Array.isArray(json.citations)) {
+    for (const citation of json.citations) push(citation);
+  }
+
+  for (const item of json.output ?? []) {
+    if (!Array.isArray(item.content)) continue;
+    for (const content of item.content) {
+      for (const annotation of content.annotations ?? []) {
+        push(annotation.url);
+        push(annotation.url_citation?.url);
+      }
+    }
+  }
+
+  return out;
 }

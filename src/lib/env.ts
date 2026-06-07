@@ -49,11 +49,7 @@ export function normalizeEnv(
   }
 
   if (!source.GROK_MODEL) {
-    // grok-4-fast-reasoning gives noticeably better hit rates on
-    // ambiguous company names than the non-reasoning variant, and the
-    // small latency penalty is fine because we now look up one company
-    // per HTTP request.
-    source.GROK_MODEL = "grok-4-fast-reasoning";
+    source.GROK_MODEL = "grok-4.3";
   }
 }
 
@@ -96,7 +92,7 @@ const envSchema = z.object({
     .enum(["development", "production", "test"])
     .default("development"),
   GROK_API_KEY: z.string().min(1).optional(),
-  GROK_MODEL: z.string().default("grok-4-fast-reasoning"),
+  GROK_MODEL: z.string().default("grok-4.3"),
   LANGSEARCH_API_KEY: z.string().min(1).optional(),
 });
 
