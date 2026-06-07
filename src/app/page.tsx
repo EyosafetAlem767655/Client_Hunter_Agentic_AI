@@ -2,7 +2,6 @@ import Link from "next/link";
 import { ArrowRight, Globe2, Settings2, Sparkles, Zap } from "lucide-react";
 import { StatsCards } from "@/components/dashboard/stats-cards";
 import { StatusIndicator } from "@/components/dashboard/status-indicator";
-import { PipelineFunnel } from "@/components/dashboard/pipeline-funnel";
 import { TrendChart } from "@/components/dashboard/trend-chart";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
@@ -136,9 +135,8 @@ export default async function DashboardPage({
         <StatsCards stats={data.stats} timeWindow={timeWindow} />
       </section>
 
-      {/* Funnel + Trend */}
-      <section className="grid gap-6 lg:grid-cols-2">
-        <PipelineFunnel stats={data.stats} />
+      {/* Trend */}
+      <section>
         <TrendChart trend={data.trend} />
       </section>
 

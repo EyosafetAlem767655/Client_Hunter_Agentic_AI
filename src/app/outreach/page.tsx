@@ -2,7 +2,6 @@ import Link from "next/link";
 import { OutreachClient } from "@/components/outreach/outreach-client";
 import type { OutreachRow } from "@/components/outreach/email-detail-drawer";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
-import { GrokChat } from "@/components/outreach/grok-chat";
 import { listOutreachPaginated } from "@/lib/db/queries";
 
 export const dynamic = "force-dynamic";
@@ -84,8 +83,6 @@ export default async function OutreachPage({
 
       {error && <DbErrorBanner message={error} />}
       {!error && <OutreachClient byStatus={byStatus} initialTab={initialTab} />}
-
-      <GrokChat />
     </div>
   );
 }

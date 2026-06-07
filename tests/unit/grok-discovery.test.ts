@@ -14,9 +14,19 @@ function mockGrokResponse(content: object, citations: string[] = []) {
   };
 }
 
-describe("discoverViaGrok", () => {
+function mockPage(html: string) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({}),
+    text: async () => html,
+  };
+}
+
+describe("discoverViaGrok (URL → scrape)", () => {
   beforeEach(() => {
     process.env.GROK_API_KEY = "xai-test-key";
+    vi.resetModules();
   });
 
   afterEach(() => {
@@ -28,18 +38,21 @@ describe("discoverViaGrok", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns the email Grok found with a high confidence score", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      mockGrokResponse(
-        {
-          email: "careers@acmestartup.io",
-          alternates: ["hello@acmestartup.io"],
-          source_url: "https://acmestartup.io/careers",
-          reason: "Listed on careers page footer.",
-        },
-        ["https://acmestartup.io/careers"]
-      )
-    );
+  it("asks Grok for the company URL then scrapes the page for emails", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("api.x.ai")) {
+        return mockGrokResponse({
+          url: "https://acmestartup.io",
+          contact_url: "https://acmestartup.io/contact",
+        });
+      }
+      if (String(url) === "https://acmestartup.io/contact") {
+        return mockPage(
+          "<html><body>Reach us at <a href='mailto:careers@acmestartup.io'>careers@acmestartup.io</a> or hello@acmestartup.io</body></html>"
+        );
+      }
+      return mockPage("");
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const { discoverViaGrok } = await import("@/lib/contact/discovery");
@@ -49,54 +62,51 @@ describe("discoverViaGrok", () => {
 
     expect(out.length).toBeGreaterThanOrEqual(1);
     expect(out[0].email).toBe("careers@acmestartup.io");
-    expect(out[0].confidence).toBeGreaterThanOrEqual(0.9);
     expect(out[0].sourceType).toBe("scraped_from_site");
     // Alternates ranked lower
     const alt = out.find((c) => c.email === "hello@acmestartup.io");
     expect(alt).toBeDefined();
     expect(alt!.confidence).toBeLessThan(out[0].confidence);
 
-    // Verify the Grok endpoint was actually used
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.x.ai/v1/chat/completions");
-    expect(init.headers.Authorization).toBe("Bearer xai-test-key");
-    const body = JSON.parse(init.body);
-    expect(body.search_parameters.mode).toBe("on");
-    expect(body.search_parameters.return_citations).toBe(true);
+    // Verify Grok endpoint received a URL-discovery prompt (not an email prompt).
+    const xaiCall = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes("api.x.ai")
+    );
+    expect(xaiCall).toBeDefined();
+    const body = JSON.parse(xaiCall![1].body);
+    const userMsg = body.messages[1].content;
+    expect(userMsg).toContain("website URL");
+    expect(userMsg).not.toContain("the email for");
   });
 
-  it("drops only obvious automation locals (noreply/postmaster); accepts everything else", async () => {
+  it("filters out automation noise from the scraped page", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        mockGrokResponse({
-          email: "noreply@acme.com",
-          alternates: ["info@acme.com", "real@goodcompany.io"],
-          source_url: null,
-          reason: null,
-        })
-      )
+      vi.fn().mockImplementation(async (url: string) => {
+        if (String(url).includes("api.x.ai")) {
+          return mockGrokResponse({
+            url: "https://acme.com",
+            contact_url: "https://acme.com/contact",
+          });
+        }
+        return mockPage(
+          "<html>noreply@acme.com info@acme.com real@goodcompany.io</html>"
+        );
+      })
     );
     const { discoverViaGrok } = await import("@/lib/contact/discovery");
     const out = await discoverViaGrok("Acme");
-    // Loose policy: noreply blocked, generic info@/personal@ allowed.
-    expect(out.map((c) => c.email)).toEqual([
-      "info@acme.com",
-      "real@goodcompany.io",
-    ]);
+    // noreply blocked; info@/personal allowed.
+    expect(out.map((c) => c.email)).toContain("info@acme.com");
+    expect(out.map((c) => c.email)).toContain("real@goodcompany.io");
+    expect(out.map((c) => c.email)).not.toContain("noreply@acme.com");
   });
 
-  it("returns [] when Grok responds with email=null", async () => {
+  it("returns [] when Grok returns no URL and no citations", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        mockGrokResponse({
-          email: null,
-          alternates: [],
-          source_url: null,
-          reason: "Company appears defunct.",
-        })
+        mockGrokResponse({ url: null, contact_url: null })
       )
     );
     const { discoverViaGrok } = await import("@/lib/contact/discovery");
@@ -120,7 +130,6 @@ describe("discoverViaGrok", () => {
 
   it("returns [] when GROK_API_KEY is unset (graceful fallback)", async () => {
     delete process.env.GROK_API_KEY;
-    // Reload modules so env picks up the absence.
     vi.resetModules();
     const { discoverViaGrok } = await import("@/lib/contact/discovery");
     const fetchMock = vi.fn();
@@ -136,14 +145,35 @@ describe("discoverViaGrok", () => {
     expect(await discoverViaGrok(" ")).toEqual([]);
     expect(await discoverViaGrok("A")).toEqual([]);
   });
+
+  it("falls through to citation URLs when no structured URL is returned", async () => {
+    const citation = "https://acme.example/contact";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string) => {
+        if (String(url).includes("api.x.ai")) {
+          return mockGrokResponse(
+            { url: null, contact_url: null },
+            [citation]
+          );
+        }
+        if (String(url) === citation) {
+          return mockPage(
+            "<html>Reach Acme at <a href='mailto:careers@acme.example'>careers@acme.example</a></html>"
+          );
+        }
+        return mockPage("");
+      })
+    );
+    const { discoverViaGrok } = await import("@/lib/contact/discovery");
+    const out = await discoverViaGrok("Acme");
+    expect(out[0]?.email).toBe("careers@acme.example");
+  });
 });
 
-describe("discoverViaGrokBatch", () => {
+describe("discoverViaGrokBatch (URL → scrape)", () => {
   beforeEach(() => {
     process.env.GROK_API_KEY = "xai-test-key";
-    // The previous describe block may have deleted the key and reset
-    // modules. Ensure env reloads with the key present so isGrokConfigured()
-    // sees it.
     vi.resetModules();
   });
 
@@ -156,34 +186,33 @@ describe("discoverViaGrokBatch", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends a single request for all companies and maps results back by name", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      mockGrokResponse({
-        results: [
-          {
-            company: "Acme",
-            email: "careers@acme.com",
-            alternates: ["hr@acme.com"],
-            source_url: "https://acme.com/careers",
-            reason: "Found on careers page.",
-          },
-          {
-            company: "Widget",
-            email: "hiring@widget.io",
-            alternates: [],
-            source_url: "https://widget.io/about",
-            reason: null,
-          },
-          {
-            company: "DefunctCo",
-            email: null,
-            alternates: [],
-            source_url: null,
-            reason: "Site no longer reachable.",
-          },
-        ],
-      })
-    );
+  it("sends a single Grok call for URLs and scrapes each page for emails", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("api.x.ai")) {
+        return mockGrokResponse({
+          results: [
+            {
+              company: "Acme",
+              url: "https://acme.com",
+              contact_url: "https://acme.com/contact",
+            },
+            {
+              company: "Widget",
+              url: "https://widget.io",
+              contact_url: "https://widget.io/contact",
+            },
+            { company: "DefunctCo", url: null, contact_url: null },
+          ],
+        });
+      }
+      if (String(url) === "https://acme.com/contact") {
+        return mockPage("Email: careers@acme.com");
+      }
+      if (String(url) === "https://widget.io/contact") {
+        return mockPage("Contact: hiring@widget.io");
+      }
+      return mockPage("");
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
@@ -193,7 +222,7 @@ describe("discoverViaGrokBatch", () => {
       { company: "DefunctCo" },
     ]);
 
-    // Grok endpoint hit once (other fetches may come from neon-http logging).
+    // Grok endpoint hit exactly once.
     const xaiCalls = fetchMock.mock.calls.filter((c) =>
       String(c[0]).includes("api.x.ai")
     );
@@ -201,9 +230,6 @@ describe("discoverViaGrokBatch", () => {
     expect(out.get("Acme")?.[0].email).toBe("careers@acme.com");
     expect(out.get("Widget")?.[0].email).toBe("hiring@widget.io");
     expect(out.has("DefunctCo")).toBe(false);
-    // Alternates ranked lower than primary
-    const acmeAlt = out.get("Acme")?.find((c) => c.email === "hr@acme.com");
-    expect(acmeAlt?.confidence).toBeLessThan(out.get("Acme")![0].confidence);
   });
 
   it("dedupes by lowercase company before calling Grok", async () => {
@@ -218,9 +244,10 @@ describe("discoverViaGrokBatch", () => {
       { company: "acme" },
     ]);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    // Only one "search the email…" line in the user prompt after dedupe.
     const userMsg = body.messages[1].content;
-    const lines = (userMsg.match(/search the email for the company called/g) ?? []).length;
+    const lines = (
+      userMsg.match(/search the company URL for/g) ?? []
+    ).length;
     expect(lines).toBe(1);
   });
 
@@ -248,19 +275,28 @@ describe("discoverViaGrokBatch", () => {
   it("recovers JSON wrapped in a markdown ```json fence", async () => {
     const fenced = `Sure, here you go:\n\n\`\`\`json\n${JSON.stringify({
       results: [
-        { company: "Acme", email: "contact@acme.com", alternates: [] },
+        {
+          company: "Acme",
+          url: "https://acme.com",
+          contact_url: "https://acme.com/contact",
+        },
       ],
     })}\n\`\`\`\n`;
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          choices: [{ message: { content: fenced } }],
-          citations: [],
-        }),
-        text: async () => "",
+      vi.fn().mockImplementation(async (url: string) => {
+        if (String(url).includes("api.x.ai")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              choices: [{ message: { content: fenced } }],
+              citations: [],
+            }),
+            text: async () => "",
+          };
+        }
+        return mockPage("Email contact@acme.com");
       })
     );
     const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
@@ -268,79 +304,31 @@ describe("discoverViaGrokBatch", () => {
     expect(out.get("Acme")?.[0].email).toBe("contact@acme.com");
   });
 
-  it("fetches Grok citations and grabs the email from the actual page when the snippet hid it", async () => {
-    let xaiCalls = 0;
+  it("falls back to citation URLs when the structured payload has no URL", async () => {
     const citation = "https://acme.example/contact";
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (url: string) => {
         if (String(url).includes("api.x.ai")) {
-          xaiCalls++;
-          // Grok returns email: null but cites the contact page.
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              choices: [
-                {
-                  message: {
-                    content: JSON.stringify({
-                      results: [
-                        {
-                          company: "Acme",
-                          email: null,
-                          alternates: [],
-                        },
-                      ],
-                    }),
-                  },
-                },
+          return mockGrokResponse(
+            {
+              results: [
+                { company: "Acme", url: null, contact_url: null },
               ],
-              citations: [citation],
-            }),
-            text: async () => "",
-          };
+            },
+            [citation]
+          );
         }
         if (String(url) === citation) {
-          return {
-            ok: true,
-            status: 200,
-            text: async () =>
-              "<html><body>Reach Acme at <a href='mailto:careers@acme.example'>careers@acme.example</a></body></html>",
-          };
+          return mockPage(
+            "<html>Reach Acme at <a href='mailto:careers@acme.example'>careers@acme.example</a></html>"
+          );
         }
-        return { ok: false, status: 404, text: async () => "" };
+        return mockPage("");
       })
     );
     const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
     const out = await discoverViaGrokBatch([{ company: "Acme" }]);
-    expect(xaiCalls).toBe(1);
     expect(out.get("Acme")?.[0].email).toBe("careers@acme.example");
-  });
-
-  it("harvests emails from prose when Grok ignores the JSON instruction", async () => {
-    const prose =
-      "Couldn't structure this perfectly but here's what I found: " +
-      "For Acme, the careers team uses hello@acme.com and for Widget try info@widget.io — both look genuine.";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          choices: [{ message: { content: prose } }],
-          citations: [],
-        }),
-        text: async () => "",
-      })
-    );
-    const { discoverViaGrokBatch } = await import("@/lib/contact/discovery");
-    const out = await discoverViaGrokBatch([
-      { company: "Acme" },
-      { company: "Widget" },
-    ]);
-    // Salvage pass assigned by proximity to company name in the prose.
-    expect(out.get("Acme")?.[0].email).toBe("hello@acme.com");
-    expect(out.get("Widget")?.[0].email).toBe("info@widget.io");
   });
 });

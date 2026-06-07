@@ -268,22 +268,20 @@ function safeHost(url: string): string | null {
   }
 }
 
-interface GrokContactResult {
-  /** Primary outreach email Grok found for the company. */
-  email: string | null;
-  /** Optional secondary candidates. */
-  alternates?: string[];
-  /** Why Grok chose this email (URL of the page it scraped from). */
-  source_url?: string | null;
-  /** Free-form confidence rationale Grok produced. */
-  reason?: string | null;
+interface GrokUrlResult {
+  /** Primary site URL Grok found for the company. */
+  url: string | null;
+  /** Optional contact page URL on the same site. */
+  contact_url?: string | null;
 }
 
 const GROK_SYSTEM_PROMPT = `You are GROK`;
 
 /**
- * Use Grok's built-in web search to find the right outreach email for a
- * company. Falls back to no result rather than guessing.
+ * Ask Grok to find the company's website / contact URL, then scrape that
+ * page (and a few contact-style variants) for emails. We no longer ask
+ * Grok for the email directly — Grok is only used for URL discovery,
+ * and the email is harvested by fetching the page and regex-matching.
  */
 export async function discoverViaGrok(
   company: string,
@@ -292,18 +290,19 @@ export async function discoverViaGrok(
   if (!isGrokConfigured()) return [];
   if (!company || company.trim().length < 2) return [];
 
-  void posting; // simplified prompt — context fields not used
-  const userPrompt = `search the email for the company called ${company}\n\nReturn JSON: { "email": "<one email or null>", "alternates": [<other emails>] }`;
+  void posting;
+  const userPrompt =
+    `search the official website URL for the company called ${company}\n\n` +
+    `Return JSON: { "url": "<https URL of the company homepage or null>", "contact_url": "<https URL of the contact page or null>" }`;
 
-  let result: Awaited<ReturnType<typeof callGrokJson<GrokContactResult>>>;
+  let result: Awaited<ReturnType<typeof callGrokJson<GrokUrlResult>>>;
   try {
-    result = await callGrokJson<GrokContactResult>({
+    result = await callGrokJson<GrokUrlResult>({
       system: GROK_SYSTEM_PROMPT,
       user: userPrompt,
       searchMode: "on",
       maxSearchResults: 6,
       sources: [{ type: "web" }],
-      // No strict schema — Grok refuses too often. Plain JSON object output.
       timeoutMs: 30_000,
     });
   } catch (e) {
@@ -314,57 +313,22 @@ export async function discoverViaGrok(
     return [];
   }
 
-  const payload = result.data;
-  const ordered: string[] = [];
-  if (payload) {
-    if (payload.email) ordered.push(payload.email);
-    if (Array.isArray(payload.alternates)) ordered.push(...payload.alternates);
-  }
-  // Last-resort: bare emails out of the raw text — Grok sometimes answers
-  // in markdown despite the JSON-only instruction.
-  if (ordered.length === 0 && result.raw) {
-    const found = result.raw.match(
-      /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
-    );
-    if (found) ordered.push(...found);
-  }
+  const candidateUrls = collectCandidateUrls(
+    [result.data?.url ?? null, result.data?.contact_url ?? null],
+    result.raw,
+    result.citations
+  );
+  if (candidateUrls.length === 0) return [];
 
-  // Bing snippets often hide the email even when the linked page shows
-  // it. Fetch each citation and grep the HTML for emails — this is the
-  // same trick the batch path uses and accounts for most of the lift.
-  if (ordered.length === 0 && result.citations.length > 0) {
-    const single = new Map<string, { company: string }>([
-      [company.toLowerCase(), { company }],
-    ]);
-    const harvested = await crawlGrokCitations(result.citations, single);
-    const list = harvested.get(company.toLowerCase()) ?? [];
-    ordered.push(...list);
-  }
-
-  const collected: DiscoveredContact[] = [];
-  const seen = new Set<string>();
-  for (let i = 0; i < ordered.length; i++) {
-    const email = ordered[i].toLowerCase().trim();
-    if (seen.has(email)) continue;
-    if (!isAcceptableGrokEmail(email)) continue;
-    seen.add(email);
-    const baseConf = i === 0 ? 0.9 : 0.72 - i * 0.04;
-    collected.push({
-      email,
-      sourceType: "scraped_from_site",
-      confidence: Math.max(0.5, Math.min(0.95, baseConf)),
-    });
-  }
-  return collected;
+  const emails = await scrapeEmailsFromUrls(candidateUrls);
+  return scoreGrokEmails(emails);
 }
 
 interface GrokBatchEntry {
   /** Echo of the input company name so we can match results back. */
   company: string;
-  email: string | null;
-  alternates?: string[];
-  source_url?: string | null;
-  reason?: string | null;
+  url: string | null;
+  contact_url?: string | null;
 }
 
 interface GrokBatchResult {
@@ -374,9 +338,10 @@ interface GrokBatchResult {
 const GROK_BATCH_SYSTEM_PROMPT = `You are GROK`;
 
 /**
- * Bulk Grok lookup: ask Grok to find the right outreach email for up to ~5
- * companies in a single request. Cheaper than 5 separate calls and stays
- * within the Vercel Hobby 60 s function budget.
+ * Bulk Grok URL lookup: ask Grok to find the official website (and contact
+ * page if any) for each company in a single request. For each URL, fetch
+ * the page and a few standard contact paths, regex-extract emails, and
+ * return the per-company contact list.
  */
 export async function discoverViaGrokBatch(
   inputs: Array<{ company: string; jobTitle?: string; jobUrl?: string }>
@@ -384,7 +349,6 @@ export async function discoverViaGrokBatch(
   const out = new Map<string, DiscoveredContact[]>();
   if (!isGrokConfigured()) return out;
 
-  // Dedupe by company name so we don't waste budget on duplicates.
   const byCompany = new Map<string, { company: string; jobTitle?: string; jobUrl?: string }>();
   for (const input of inputs) {
     const key = input.company?.trim();
@@ -396,16 +360,12 @@ export async function discoverViaGrokBatch(
   const deduped = Array.from(byCompany.values());
   if (deduped.length === 0) return out;
 
-  // Per the user's spec: ask Grok one line per company, no extra context.
-  // Return JSON so we can map answers back to the right input. Anything
-  // Grok produces in prose still gets picked up by the salvage / citation
-  // passes below.
   const queries = deduped
-    .map((e) => `search the email for the company called ${e.company}`)
+    .map((e) => `search the company URL for ${e.company}`)
     .join("\n");
   const userPrompt =
     `${queries}\n\n` +
-    `Return JSON: { "results": [{ "company", "email", "alternates" }] }`;
+    `Return JSON: { "results": [{ "company", "url", "contact_url" }] }`;
 
   let res: Awaited<ReturnType<typeof callGrokJson<GrokBatchResult>>>;
   try {
@@ -413,15 +373,8 @@ export async function discoverViaGrokBatch(
       system: GROK_BATCH_SYSTEM_PROMPT,
       user: userPrompt,
       searchMode: "on",
-      // Each company gets ~1-2 searches; cap the total to keep latency in check.
       maxSearchResults: Math.min(12, deduped.length * 3),
       sources: [{ type: "web" }],
-      // Intentionally NO json_schema — the strict OpenAI-style schema makes
-      // Grok refuse outright when its scraped data doesn't fit. We let the
-      // model produce a plain JSON object instead, parse what we can, and
-      // even extract bare emails from the raw text as a last resort.
-      // 22 s per batch × concurrency 4 keeps the discovery phase under
-      // ~30 s wall-time even when batches stall.
       timeoutMs: 22_000,
     });
   } catch (e) {
@@ -432,12 +385,14 @@ export async function discoverViaGrokBatch(
     return out;
   }
 
-  // Try the structured payload first.
+  // Build a per-company list of URLs to scrape: prefer Grok's structured
+  // payload, then fall back to any URLs cited in the raw response for
+  // companies the payload missed.
+  const urlsByCompany = new Map<string, string[]>();
   const payload = tryParseGrokBatch(res.raw, res.data);
-  const matched = new Set<string>();
+  const keys = Array.from(byCompany.keys());
 
   if (payload && Array.isArray(payload.results)) {
-    const keys = Array.from(byCompany.keys());
     for (const entry of payload.results) {
       const rawKey = entry.company?.trim().toLowerCase() ?? "";
       let inputKey: string | undefined;
@@ -452,56 +407,47 @@ export async function discoverViaGrokBatch(
         }
       }
       if (!inputKey) continue;
+      const list = urlsByCompany.get(inputKey) ?? [];
+      for (const u of [entry.contact_url, entry.url]) {
+        if (typeof u === "string" && u.startsWith("http")) list.push(u);
+      }
+      urlsByCompany.set(inputKey, list);
+    }
+  }
 
-      const ordered = [entry.email, ...(entry.alternates ?? [])].filter(
-        (e): e is string => typeof e === "string" && e.length > 0
-      );
-
-      const contacts = scoreGrokEmails(ordered);
-      if (contacts.length > 0) {
-        const inputCompany = byCompany.get(inputKey)!.company;
-        out.set(inputCompany, contacts);
-        matched.add(inputKey);
+  // Fall back to citations / bare URLs in the raw text for companies the
+  // structured payload didn't cover. Assign each citation to the company
+  // whose lowercase name appears in the URL.
+  for (const url of [...res.citations, ...extractUrlsFromText(res.raw)]) {
+    if (!url.startsWith("http")) continue;
+    const lowerUrl = url.toLowerCase();
+    for (const key of keys) {
+      const compact = key.replace(/[^a-z0-9]/g, "");
+      if (!compact) continue;
+      if (lowerUrl.includes(compact)) {
+        const list = urlsByCompany.get(key) ?? [];
+        if (!list.includes(url)) list.push(url);
+        urlsByCompany.set(key, list);
+        break;
       }
     }
   }
 
-  // Salvage pass: for any input company we couldn't satisfy from the
-  // structured payload, scan the raw response for emails that mention the
-  // company anywhere nearby. Grok sometimes writes "Acme — careers@acme.com"
-  // in markdown despite our JSON-only instruction; don't waste it.
-  if (matched.size < byCompany.size) {
-    const harvested = harvestEmailsByCompany(res.raw, byCompany);
-    for (const [inputKey, emails] of Array.from(harvested.entries())) {
-      if (matched.has(inputKey)) continue;
-      const contacts = scoreGrokEmails(emails);
-      if (contacts.length === 0) continue;
-      const inputCompany = byCompany.get(inputKey)!.company;
-      out.set(inputCompany, contacts);
-      matched.add(inputKey);
-    }
-  }
-
-  // ── Citation crawl ───────────────────────────────────────────────
-  // The single biggest reason Grok returns no email even when one is
-  // visible on Google: Bing's snippet doesn't include the email but the
-  // actual cited page does. We have the URLs Grok visited — fetch them
-  // directly and grep for the company's domain emails.
-  if (matched.size < byCompany.size && res.citations.length > 0) {
-    const citationEmails = await crawlGrokCitations(res.citations, byCompany);
-    for (const [inputKey, emails] of Array.from(citationEmails.entries())) {
-      if (matched.has(inputKey)) continue;
-      const contacts = scoreGrokEmails(emails);
-      if (contacts.length === 0) continue;
-      const inputCompany = byCompany.get(inputKey)!.company;
-      out.set(inputCompany, contacts);
-      matched.add(inputKey);
-    }
+  // Scrape each company's URLs for emails.
+  let matched = 0;
+  for (const [inputKey, urls] of Array.from(urlsByCompany.entries())) {
+    if (urls.length === 0) continue;
+    const emails = await scrapeEmailsFromUrls(urls);
+    const contacts = scoreGrokEmails(emails);
+    if (contacts.length === 0) continue;
+    const inputCompany = byCompany.get(inputKey)!.company;
+    out.set(inputCompany, contacts);
+    matched++;
   }
 
   await logEvent("info", "Grok batch parsed", {
     requested: deduped.length,
-    matched: matched.size,
+    matched,
     hadStructuredPayload: !!payload?.results?.length,
     citations: res.citations.length,
   });
@@ -509,82 +455,88 @@ export async function discoverViaGrokBatch(
   return out;
 }
 
+function collectCandidateUrls(
+  primary: Array<string | null>,
+  raw: string,
+  citations: string[]
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (u: string | null | undefined) => {
+    if (!u || typeof u !== "string") return;
+    if (!u.startsWith("http")) return;
+    if (seen.has(u)) return;
+    seen.add(u);
+    out.push(u);
+  };
+  for (const u of primary) push(u);
+  for (const u of citations) push(u);
+  for (const u of extractUrlsFromText(raw)) push(u);
+  return out;
+}
+
+function extractUrlsFromText(text: string): string[] {
+  if (!text) return [];
+  return text.match(/https?:\/\/[^\s"'<>)]+/g) ?? [];
+}
+
 /**
- * Fetch each URL Grok cited and extract emails from the HTML. Maps each
- * email to the company whose lowercase name appears in the page text or
- * the URL itself (fuzzy substring match). This is the main reason the
- * loop now picks up addresses Google shows but Bing snippets hide.
+ * Fetch each URL (plus a few standard contact-style sub-paths on each
+ * origin), regex-extract emails, and return them in discovery order.
+ * Mirrors the user's reference snippet: `requests.get(url)` + email regex.
  */
-async function crawlGrokCitations(
-  citations: string[],
-  byCompany: Map<string, { company: string }>
-): Promise<Map<string, string[]>> {
-  const out = new Map<string, string[]>();
-  const limited = citations.slice(0, 8); // cap fetches per call
-  const fetched = await Promise.allSettled(
-    limited.map(async (url) => {
-      // Skip blocked / hostile domains (linkedin, indeed, etc.) and
-      // anything we can't parse as a URL.
-      try {
-        assertAllowedUrl(url);
-      } catch {
-        return null;
-      }
-      try {
-        const html = await defaultFetch(url);
-        return { url, html };
-      } catch {
-        return null;
-      }
-    })
-  );
+async function scrapeEmailsFromUrls(urls: string[]): Promise<string[]> {
+  const ordered: string[] = [];
+  const seenEmails = new Set<string>();
+  const seenUrls = new Set<string>();
 
-  for (const r of fetched) {
-    if (r.status !== "fulfilled" || !r.value) continue;
-    const { url, html } = r.value;
-    const emails = extractEmailsFromText(html);
-    if (emails.length === 0) continue;
-
-    const lowerHtml = html.toLowerCase();
-    const lowerUrl = url.toLowerCase();
-    const keys = Array.from(byCompany.keys());
-
-    for (const email of emails) {
-      const local = email.split("@")[0]?.toLowerCase() ?? "";
-      const domain = email.split("@")[1]?.toLowerCase() ?? "";
-      // Pick the company most likely to own this email by inspecting:
-      //   1. email local-part / domain
-      //   2. the URL we fetched
-      //   3. the rendered HTML text
-      let assigned: string | null = null;
-      for (const key of keys) {
-        const compact = key.replace(/[^a-z0-9]/g, "");
-        if (!compact) continue;
-        if (
-          local.includes(compact) ||
-          domain.includes(compact) ||
-          lowerUrl.includes(compact) ||
-          lowerHtml.includes(key)
-        ) {
-          assigned = key;
-          break;
-        }
-      }
-      if (!assigned) continue;
-      const list = out.get(assigned) ?? [];
-      if (!list.includes(email)) list.push(email);
-      out.set(assigned, list);
+  // Expand each URL into the URL itself + a few standard contact paths.
+  const candidates: string[] = [];
+  for (const url of urls.slice(0, 6)) {
+    try {
+      assertAllowedUrl(url);
+    } catch {
+      continue;
+    }
+    let origin: string;
+    try {
+      origin = new URL(url).origin;
+    } catch {
+      continue;
+    }
+    if (!seenUrls.has(url)) {
+      seenUrls.add(url);
+      candidates.push(url);
+    }
+    for (const path of COMPANY_PATHS) {
+      const candidate = `${origin}${path}`;
+      if (seenUrls.has(candidate)) continue;
+      seenUrls.add(candidate);
+      candidates.push(candidate);
     }
   }
-  return out;
+
+  for (const candidate of candidates) {
+    try {
+      const html = await defaultFetch(candidate);
+      for (const email of extractEmailsFromText(html)) {
+        if (seenEmails.has(email)) continue;
+        seenEmails.add(email);
+        ordered.push(email);
+      }
+      if (ordered.length >= 3) break;
+    } catch {
+      continue;
+    }
+  }
+  return ordered;
 }
 
 /**
  * Loose filter: drop ONLY obvious automation noise. We deliberately don't
- * reject job-board / ATS / tracker domains here — Grok occasionally finds
- * the genuine employer mailbox hosted at a third party (e.g. a small
- * studio still using a Wix-hosted address), and rejecting them costs us
- * more leads than we save in noise.
+ * reject job-board / ATS / tracker domains here — small studios sometimes
+ * have their genuine mailbox hosted at a third party (e.g. a Wix-hosted
+ * address), and rejecting them costs us more leads than we save in noise.
  */
 function isAcceptableGrokEmail(email: string): boolean {
   const lower = email.toLowerCase();
@@ -633,65 +585,6 @@ function tryParseGrokBatch(
     /* swallow */
   }
   return null;
-}
-
-/**
- * If JSON parsing fails entirely, walk the raw text and assign any emails
- * we find to the company name that appears nearest to them (within a 240-
- * char window). This is messy but recovers real leads when Grok decides
- * to answer in prose despite our instructions.
- */
-function harvestEmailsByCompany(
-  raw: string,
-  byCompany: Map<string, { company: string }>
-): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  if (!raw) return out;
-  const lower = raw.toLowerCase();
-  const companies = Array.from(byCompany.entries()); // [lowercaseKey, input]
-
-  const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-  let match: RegExpExecArray | null;
-  while ((match = emailRe.exec(raw)) !== null) {
-    const email = match[0].toLowerCase();
-    const at = match.index;
-    const windowStart = Math.max(0, at - 240);
-    const windowEnd = Math.min(raw.length, at + 240);
-    const ctx = lower.slice(windowStart, windowEnd);
-
-    // Strong signal: if the email's local-part or domain contains the
-    // company name, that's the right owner regardless of prose proximity.
-    let bestKey: string | null = null;
-    for (const [key] of companies) {
-      const compact = key.replace(/[^a-z0-9]/g, "");
-      if (!compact) continue;
-      if (email.includes(compact)) {
-        bestKey = key;
-        break;
-      }
-    }
-
-    // Fallback: pick the company whose name appears closest in the window.
-    if (!bestKey) {
-      let bestDist = Infinity;
-      for (const [key] of companies) {
-        const idx = ctx.indexOf(key);
-        if (idx === -1) continue;
-        const absIdx = windowStart + idx;
-        const dist = Math.abs(absIdx - at);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestKey = key;
-        }
-      }
-    }
-
-    if (!bestKey) continue;
-    const list = out.get(bestKey) ?? [];
-    if (!list.includes(email)) list.push(email);
-    out.set(bestKey, list);
-  }
-  return out;
 }
 
 export function discoverByPatternGuess(
