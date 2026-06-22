@@ -19,12 +19,12 @@ export async function runNodeScrapers(limit: number): Promise<NodeScrapeResult> 
   const all: RawPosting[] = [];
   const sources: NodeScrapeResult["sources"] = [];
 
-  // Ask each scraper for the full quota; downstream caps the run.
-  const perSource = Math.max(50, Math.ceil(limit));
+  const perSource = perSourceLimit(limit, scrapers.length);
+  const sourceTimeoutMs = perSourceTimeoutMs();
 
   const results = await Promise.allSettled(
     scrapers.map(async (s) => {
-      const batch = await s.fetch(perSource);
+      const batch = await s.fetchWithinBudget(perSource, sourceTimeoutMs);
       return { source: s.source, batch };
     })
   );
@@ -58,4 +58,21 @@ export async function runNodeScrapers(limit: number): Promise<NodeScrapeResult> 
   // memory layer dedupes against what's already in the DB. Slicing here
   // would silently throw away matches.
   return { postings: all, scraped: all.length, sources };
+}
+
+function perSourceLimit(limit: number, sourceCount: number): number {
+  const configured = Number(process.env.SCRAPER_PER_SOURCE_LIMIT);
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.max(1, Math.floor(configured));
+  }
+  if (process.env.VERCEL === "1") {
+    return Math.max(8, Math.ceil(limit / Math.max(1, sourceCount)));
+  }
+  return Math.max(50, Math.ceil(limit));
+}
+
+function perSourceTimeoutMs(): number {
+  const configured = Number(process.env.SCRAPER_SOURCE_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return process.env.VERCEL === "1" ? 8_000 : 15_000;
 }

@@ -136,6 +136,51 @@ describe("requested job-board scrapers", () => {
     ]);
   });
 
+  it("uses the bounded fetch path in the node runner", async () => {
+    vi.resetModules();
+    const fetchWithinBudget = vi.fn().mockResolvedValue([
+      posting("remote_co", "bounded-1"),
+    ]);
+    vi.doMock("@/lib/scrapers", () => ({
+      getEnabledScrapers: () => [
+        {
+          source: "remote_co",
+          fetchWithinBudget,
+        },
+      ],
+    }));
+    const { runNodeScrapers } = await import("@/lib/scraper/node-runner");
+
+    const result = await runNodeScrapers(150);
+
+    expect(fetchWithinBudget).toHaveBeenCalledWith(150, 15_000);
+    expect(result.postings).toHaveLength(1);
+    expect(result.sources[0]).toMatchObject({
+      source: "remote_co",
+      status: "scraped",
+      count: 1,
+    });
+  });
+
+  it("reduces per-source quota and timeout on Vercel", async () => {
+    vi.resetModules();
+    vi.stubEnv("VERCEL", "1");
+    const fetchWithinBudget = vi.fn().mockResolvedValue([]);
+    vi.doMock("@/lib/scrapers", () => ({
+      getEnabledScrapers: () =>
+        Array.from({ length: 10 }, (_, i) => ({
+          source: i === 0 ? "remote_co" : "remoteok",
+          fetchWithinBudget,
+        })),
+    }));
+    const { runNodeScrapers } = await import("@/lib/scraper/node-runner");
+
+    await runNodeScrapers(150);
+
+    expect(fetchWithinBudget).toHaveBeenCalledWith(15, 8_000);
+    vi.unstubAllEnvs();
+  });
+
   it("covers shared HTML-card helpers used by requested scrapers", () => {
     const $ = cheerio.load(`
       <article>

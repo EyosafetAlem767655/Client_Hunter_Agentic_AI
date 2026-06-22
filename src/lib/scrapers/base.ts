@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import * as cheerio from "cheerio";
 import type { RawPosting } from "@/types";
 import { jitterMs, sleep } from "@/lib/utils";
+import { ScraperRejectedError } from "./errors";
 
 const BLOCKED_DOMAINS = [
   "linkedin.com",
@@ -29,6 +30,7 @@ export abstract class BaseScraper {
   protected userAgent: string;
   protected acceptHeader = "application/json, text/html, application/xml;q=0.9, */*;q=0.8";
   private robotsCache = new Map<string, string>();
+  private deadlineAtMs: number | null = null;
 
   constructor(source: RawPosting["source"], contactEmail: string) {
     this.source = source;
@@ -43,16 +45,29 @@ export abstract class BaseScraper {
 
   abstract fetch(limit: number): Promise<RawPosting[]>;
 
+  async fetchWithinBudget(
+    limit: number,
+    budgetMs: number
+  ): Promise<RawPosting[]> {
+    this.deadlineAtMs = Date.now() + budgetMs;
+    try {
+      return await this.fetch(limit);
+    } finally {
+      this.deadlineAtMs = null;
+    }
+  }
+
   protected async fetchWithRetry(
     url: string,
     options: RequestInit = {}
   ): Promise<Response> {
     assertAllowedUrl(url);
-    const maxAttempts = 3;
+    const maxAttempts = scraperMaxAttempts();
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
+        const timeoutMs = this.nextRequestTimeoutMs(url);
         const response = await fetch(url, {
           ...options,
           headers: {
@@ -62,7 +77,7 @@ export abstract class BaseScraper {
             "Cache-Control": "no-cache",
             ...(options.headers ?? {}),
           },
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(timeoutMs),
           redirect: "follow",
         });
 
@@ -84,7 +99,7 @@ export abstract class BaseScraper {
           throw lastError;
         }
         if (attempt < maxAttempts - 1) {
-          await sleep(2 ** attempt * 500);
+          await sleep(this.nextBackoffMs(2 ** attempt * 500));
         }
       }
     }
@@ -136,6 +151,24 @@ export abstract class BaseScraper {
     return createHash("sha256").update(input).digest("hex").slice(0, 16);
   }
 
+  private nextRequestTimeoutMs(url: string): number {
+    const requestTimeout = scraperFetchTimeoutMs();
+    if (!this.deadlineAtMs) return requestTimeout;
+    const remaining = this.deadlineAtMs - Date.now();
+    if (remaining <= 0) {
+      throw new ScraperRejectedError(
+        `${this.source} scraper timed out before fetching ${url}`
+      );
+    }
+    return Math.max(250, Math.min(requestTimeout, remaining));
+  }
+
+  private nextBackoffMs(ms: number): number {
+    if (!this.deadlineAtMs) return ms;
+    const remaining = this.deadlineAtMs - Date.now();
+    return Math.max(0, Math.min(ms, remaining));
+  }
+
   protected parseJsonLdPostings(html: string, pageUrl: string): RawPosting[] {
     const $ = cheerio.load(html);
     const out: RawPosting[] = [];
@@ -177,6 +210,20 @@ export abstract class BaseScraper {
     });
     return out;
   }
+}
+
+function scraperFetchTimeoutMs(): number {
+  const configured = Number(process.env.SCRAPER_FETCH_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return process.env.VERCEL === "1" ? 5_000 : 20_000;
+}
+
+function scraperMaxAttempts(): number {
+  const configured = Number(process.env.SCRAPER_MAX_ATTEMPTS);
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.max(1, Math.floor(configured));
+  }
+  return process.env.VERCEL === "1" ? 1 : 3;
 }
 
 function robotsPatternMatches(pattern: string, target: string): boolean {
