@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import * as cheerio from "cheerio";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { RemoteCoScraper } from "@/lib/scrapers/remote-co";
 import { WellfoundScraper } from "@/lib/scrapers/wellfound";
@@ -7,6 +8,13 @@ import { TotaljobsScraper } from "@/lib/scrapers/totaljobs";
 import { StepStoneScraper } from "@/lib/scrapers/stepstone";
 import { WelcomeToTheJungleScraper } from "@/lib/scrapers/welcome-to-the-jungle";
 import { MonsterScraper } from "@/lib/scrapers/monster";
+import {
+  absoluteUrl,
+  dedupePostings,
+  parseDate,
+  textFrom,
+} from "@/lib/scrapers/html-card";
+import type { RawPosting } from "@/types";
 
 vi.mock("@/lib/utils", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/utils")>();
@@ -37,6 +45,20 @@ function stubHtml(html: string) {
       return htmlResponse(html);
     })
   );
+}
+
+function posting(source: RawPosting["source"], externalId: string): RawPosting {
+  return {
+    source,
+    externalId,
+    url: `https://example.com/jobs/${externalId}`,
+    title: "Virtual Assistant",
+    company: "Example Co",
+    location: "Remote",
+    description: "Inbox and calendar support.",
+    postedAt: null,
+    raw: {},
+  };
 }
 
 describe("requested job-board scrapers", () => {
@@ -112,5 +134,38 @@ describe("requested job-board scrapers", () => {
         error: "disabled",
       }),
     ]);
+  });
+
+  it("covers shared HTML-card helpers used by requested scrapers", () => {
+    const $ = cheerio.load(`
+      <article>
+        <h3>  Customer   Support   Assistant  </h3>
+        <span class="empty"></span>
+      </article>
+    `);
+    const root = $("article");
+
+    expect(absoluteUrl("/jobs/1", "https://example.com/search")).toBe(
+      "https://example.com/jobs/1"
+    );
+    expect(absoluteUrl(undefined, "https://example.com/search")).toBeNull();
+    expect(absoluteUrl("http://[bad", "https://example.com/search")).toBeNull();
+
+    expect(textFrom(root, [".missing", "h3"])).toBe(
+      "Customer Support Assistant"
+    );
+    expect(textFrom(root, [".missing", ".empty"])).toBe("");
+
+    expect(
+      dedupePostings([
+        posting("remote_co", "1"),
+        posting("remote_co", "1"),
+        posting("wellfound", "1"),
+      ]).map((item) => `${item.source}:${item.externalId}`)
+    ).toEqual(["remote_co:1", "wellfound:1"]);
+
+    expect(parseDate("2026-01-01")).toBeInstanceOf(Date);
+    expect(parseDate("not-a-date")).toBeNull();
+    expect(parseDate(null)).toBeNull();
   });
 });
