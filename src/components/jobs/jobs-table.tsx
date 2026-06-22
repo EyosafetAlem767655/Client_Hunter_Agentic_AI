@@ -15,6 +15,8 @@ export interface JobRow {
   id: number;
   title: string;
   company: string;
+  source: string;
+  sourceLabel: string;
   score: number | null;
   isRelevant: boolean | null;
   fitReason: string | null;
@@ -45,6 +47,7 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
             <tr>
               <th className="p-4">Title</th>
               <th className="p-4">Company</th>
+              <th className="p-4">Source</th>
               <th className="p-4">Scraped</th>
               <th className="p-4">Contact</th>
               <th className="p-4">Score</th>
@@ -54,7 +57,7 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
           <tbody>
             {jobs.length === 0 && (
               <tr>
-                <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                <td colSpan={7} className="p-8 text-center text-muted-foreground">
                   No jobs match this filter yet.
                 </td>
               </tr>
@@ -67,6 +70,11 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
               >
                 <td className="p-4 font-medium">{job.title}</td>
                 <td className="p-4">{job.company}</td>
+                <td className="p-4">
+                  <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                    {job.sourceLabel}
+                  </span>
+                </td>
                 <td className="p-4 whitespace-nowrap text-xs text-muted-foreground">
                   {job.scrapedAt ? relativeTime(job.scrapedAt) : "—"}
                 </td>
@@ -130,7 +138,12 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
               <SheetHeader>
                 <SheetTitle>{selected.title}</SheetTitle>
               </SheetHeader>
-              <p className="mt-2 text-sm text-muted-foreground">{selected.company}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>{selected.company}</span>
+                <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                  {selected.sourceLabel}
+                </span>
+              </div>
               <a
                 href={selected.url}
                 target="_blank"

@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "jobId": 123,
+      "jobTitle": "Customer Support Assistant",
+      "employerName": "ReedCo",
+      "locationName": "Remote, UK",
+      "jobDescription": "Customer support and admin inbox management.",
+      "date": "2026-01-02T00:00:00Z",
+      "jobUrl": "https://www.reed.co.uk/jobs/customer-support-assistant/123",
+      "minimumSalary": 22000,
+      "maximumSalary": 28000,
+      "currency": "GBP",
+      "salaryType": "per annum"
+    }
+  ]
+}

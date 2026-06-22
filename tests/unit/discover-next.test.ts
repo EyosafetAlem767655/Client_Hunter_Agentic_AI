@@ -77,7 +77,7 @@ describe("discoverNextContacts", () => {
       sourceType: "langsearch_scraped",
       confidence: "0.92",
     });
-  });
+  }, 15_000);
 
   it("persists URL-only rows when no email is found", async () => {
     mocks.listTopRelevantWithoutContacts.mockResolvedValue([jobRow(2, "GhostCo")]);

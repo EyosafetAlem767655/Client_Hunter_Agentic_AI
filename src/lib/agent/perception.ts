@@ -1,6 +1,7 @@
 import { runNodeScrapers } from "@/lib/scraper/node-runner";
 import { runPythonScrapers } from "@/lib/scraper/python-client";
-import type { RawPosting } from "@/types";
+import { jobSourceLabel } from "@/lib/job-sources";
+import type { RawPosting, ScrapeSourceStatus } from "@/types";
 import { filterNewPostings, memory } from "./memory";
 import { logEvent } from "./observability";
 import { filterVaPostings } from "./va-filter";
@@ -33,22 +34,23 @@ export async function runPerception(limit: number): Promise<{
   scraped: number;
   inserted: number;
   engine: Engine;
-  sources: Array<{ source: string; ok: boolean; count?: number; error?: string }>;
+  sources: ScrapeSourceStatus[];
 }> {
   const engine = pickEngine();
   await logEvent("info", `Starting ${engine} scrapers`);
 
-  let result: {
-    postings: RawPosting[];
-    scraped: number;
-    sources: Array<{ source: string; ok: boolean; count?: number; error?: string }>;
-  };
+    let result: {
+      postings: RawPosting[];
+      scraped: number;
+      sources: ScrapeSourceStatus[];
+    };
 
   try {
     if (engine === "node") {
       result = await runNodeScrapers(limit);
     } else {
-      result = await runPythonScrapers(limit);
+      const python = await runPythonScrapers(limit);
+      result = { ...python, sources: normalizeLegacySources(python.sources) };
     }
   } catch (primaryError) {
     const message =
@@ -60,7 +62,10 @@ export async function runPerception(limit: number): Promise<{
     try {
       result =
         engine === "node"
-          ? await runPythonScrapers(limit)
+          ? await runPythonScrapers(limit).then((python) => ({
+              ...python,
+              sources: normalizeLegacySources(python.sources),
+            }))
           : await runNodeScrapers(limit);
     } catch (fallbackError) {
       const fbMessage =
@@ -108,4 +113,17 @@ export async function runPerception(limit: number): Promise<{
   });
 
   return { scraped, inserted, engine, sources: result.sources };
+}
+
+function normalizeLegacySources(
+  sources: Array<{ source: string; ok: boolean; count?: number; error?: string }>
+): ScrapeSourceStatus[] {
+  return sources.map((source) => ({
+    source: source.source as RawPosting["source"],
+    label: jobSourceLabel(source.source),
+    ok: source.ok,
+    status: source.ok ? "scraped" : "rejected",
+    count: source.count ?? 0,
+    error: source.error,
+  }));
 }

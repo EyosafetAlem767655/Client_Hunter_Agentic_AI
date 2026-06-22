@@ -36,6 +36,9 @@ export default async function SettingsPage() {
           LANGSEARCH_API_KEY: env.LANGSEARCH_API_KEY
             ? maskSecret(env.LANGSEARCH_API_KEY)
             : "(not set)",
+          REED_API_KEY: env.REED_API_KEY
+            ? maskSecret(env.REED_API_KEY)
+            : "(not set)",
           DRY_RUN: env.DRY_RUN,
           AGENT_ENABLED: env.AGENT_ENABLED,
         }}

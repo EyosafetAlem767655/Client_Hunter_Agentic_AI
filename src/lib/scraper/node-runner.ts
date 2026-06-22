@@ -1,10 +1,12 @@
 import { getEnabledScrapers } from "@/lib/scrapers";
-import type { RawPosting } from "@/types";
+import { jobSourceLabel } from "@/lib/job-sources";
+import { scraperStatusFromError } from "@/lib/scrapers/errors";
+import type { RawPosting, ScrapeSourceStatus } from "@/types";
 
 export interface NodeScrapeResult {
   postings: RawPosting[];
   scraped: number;
-  sources: Array<{ source: string; ok: boolean; count?: number; error?: string }>;
+  sources: ScrapeSourceStatus[];
 }
 
 /**
@@ -32,10 +34,23 @@ export async function runNodeScrapers(limit: number): Promise<NodeScrapeResult> 
     const sourceName = scrapers[i].source;
     if (r.status === "fulfilled") {
       all.push(...r.value.batch);
-      sources.push({ source: sourceName, ok: true, count: r.value.batch.length });
+      sources.push({
+        source: sourceName,
+        label: jobSourceLabel(sourceName),
+        ok: true,
+        status: "scraped",
+        count: r.value.batch.length,
+      });
     } else {
       const error = r.reason instanceof Error ? r.reason.message : String(r.reason);
-      sources.push({ source: sourceName, ok: false, error });
+      sources.push({
+        source: sourceName,
+        label: jobSourceLabel(sourceName),
+        ok: false,
+        status: scraperStatusFromError(r.reason),
+        count: 0,
+        error,
+      });
     }
   }
 

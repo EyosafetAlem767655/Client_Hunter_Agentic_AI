@@ -97,6 +97,7 @@ const envSchema = z.object({
     .enum(["development", "production", "test"])
     .default("development"),
   LANGSEARCH_API_KEY: z.string().min(1).optional(),
+  REED_API_KEY: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

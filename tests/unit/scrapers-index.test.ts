@@ -8,10 +8,19 @@ describe("scraper registry", () => {
       "remotive",
       "arbeitnow",
       "jobicy",
+      "reed",
+      "remote_co",
       "weworkremotely",
       "remoteok",
+      "wellfound",
+      "totaljobs",
+      "stepstone",
+      "welcome_to_the_jungle",
+      "monster",
       "hn",
       "wwr_dom",
+      "indeed",
+      "ziprecruiter",
     ]);
   });
 });

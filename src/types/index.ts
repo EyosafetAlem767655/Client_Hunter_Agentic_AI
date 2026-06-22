@@ -1,11 +1,35 @@
 export type JobSource =
   | "remoteok"
+  | "remote_co"
   | "weworkremotely"
   | "hn"
   | "remotive"
   | "arbeitnow"
   | "jobicy"
-  | "wwr_dom";
+  | "wwr_dom"
+  | "wellfound"
+  | "reed"
+  | "totaljobs"
+  | "stepstone"
+  | "welcome_to_the_jungle"
+  | "monster"
+  | "indeed"
+  | "ziprecruiter";
+
+export type ScrapeSourceStatusValue =
+  | "scraped"
+  | "rejected"
+  | "not_configured"
+  | "not_attempted";
+
+export interface ScrapeSourceStatus {
+  source: JobSource;
+  label: string;
+  ok: boolean;
+  status: ScrapeSourceStatusValue;
+  count?: number;
+  error?: string;
+}
 
 export interface RawPosting {
   source: JobSource;

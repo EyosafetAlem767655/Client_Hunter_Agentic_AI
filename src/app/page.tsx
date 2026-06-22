@@ -5,6 +5,7 @@ import { StatusIndicator } from "@/components/dashboard/status-indicator";
 import { TrendChart } from "@/components/dashboard/trend-chart";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
+import { SourceStatusComparison } from "@/components/dashboard/source-status-comparison";
 import { safeDashboardData } from "@/lib/db/safe-queries";
 import { env } from "@/lib/env";
 
@@ -82,7 +83,7 @@ export default async function DashboardPage({
         <div className="relative mt-8 grid gap-3 sm:grid-cols-3">
           <FeaturePill
             icon={<Globe2 className="h-4 w-4" />}
-            text="7 sources · US + Europe"
+            text="Requested job sites · US + Europe"
           />
           <FeaturePill
             icon={<Sparkles className="h-4 w-4" />}
@@ -148,6 +149,15 @@ export default async function DashboardPage({
           subtitle="Everything the agent did, in order."
         />
         <RecentActivity events={data.activity} />
+      </section>
+
+      <section>
+        <SectionHeader
+          eyebrow="Source health"
+          title="Job-site scrape status"
+          subtitle="Latest scrape result for each configured source."
+        />
+        <SourceStatusComparison sources={data.sourceStatuses} />
       </section>
     </div>
   );

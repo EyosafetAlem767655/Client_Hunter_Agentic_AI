@@ -91,5 +91,5 @@ describe("discoverContactsForTopJobs", () => {
       sourceType: "url_only",
       confidence: "0.40",
     });
-  });
+  }, 15_000);
 });

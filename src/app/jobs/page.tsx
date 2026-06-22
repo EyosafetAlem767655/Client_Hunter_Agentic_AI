@@ -2,6 +2,7 @@ import Link from "next/link";
 import { JobsTable, type JobRow } from "@/components/jobs/jobs-table";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
 import { listJobsPaginated } from "@/lib/db/queries";
+import { jobSourceLabel } from "@/lib/job-sources";
 import type { contacts, filteredJobs, jobPostings } from "@/lib/db/schema";
 
 type JobListItem = {
@@ -51,6 +52,8 @@ export default async function JobsPage({
       id: row.posting.id,
       title: row.posting.title,
       company: row.posting.company,
+      source: row.posting.source,
+      sourceLabel: jobSourceLabel(row.posting.source),
       score: row.filtered?.score ?? null,
       isRelevant: row.filtered?.isRelevant ?? null,
       fitReason: row.filtered?.fitReason ?? null,

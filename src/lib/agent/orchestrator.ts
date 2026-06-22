@@ -14,7 +14,7 @@ import { filterPendingPostings } from "./reasoning";
 import { setRunId, logEvent } from "./observability";
 import { sendDailyDigest, sendInstantVaAlert } from "@/lib/email/digest";
 import type { RawPosting } from "@/types";
-import type { PipelineSummary } from "@/types";
+import type { PipelineSummary, ScrapeSourceStatus } from "@/types";
 
 async function resolveDryRun(): Promise<boolean> {
   const dbSetting = await memory.getSetting("DRY_RUN");
@@ -79,7 +79,7 @@ export async function runScrapePipelineFromPostings(
       scraped: number;
       inserted: number;
       engine?: string;
-      sources?: Array<{ source: string; ok: boolean; count?: number; error?: string }>;
+      sources?: ScrapeSourceStatus[];
     };
 
     if (preloadedPostings) {

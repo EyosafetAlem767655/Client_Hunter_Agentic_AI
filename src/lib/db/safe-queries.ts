@@ -2,6 +2,7 @@ import {
   getDashboardStats,
   getEmailsSentPerDay,
   getLastSuccessfulRunAt,
+  getLatestScrapeSourceStatuses,
   listRecentEvents,
 } from "./queries";
 
@@ -16,11 +17,12 @@ const EMPTY_STATS = {
 
 export async function safeDashboardData(timeWindow: string = "24h") {
   try {
-    const [stats, trend, activity, lastRunAt] = await Promise.all([
+    const [stats, trend, activity, lastRunAt, sourceStatuses] = await Promise.all([
       getDashboardStats(timeWindow),
       getEmailsSentPerDay(30),
       listRecentEvents(20, 0),
       getLastSuccessfulRunAt(),
+      getLatestScrapeSourceStatuses(),
     ]);
 
     return {
@@ -38,6 +40,7 @@ export async function safeDashboardData(timeWindow: string = "24h") {
         createdAt: e.createdAt.toISOString(),
       })),
       lastRunAt: lastRunAt?.toISOString() ?? null,
+      sourceStatuses,
     };
   } catch (error) {
     const message =
@@ -55,6 +58,7 @@ export async function safeDashboardData(timeWindow: string = "24h") {
         createdAt: string;
       }>,
       lastRunAt: null as string | null,
+      sourceStatuses: [] as Awaited<ReturnType<typeof getLatestScrapeSourceStatuses>>,
     };
   }
 }

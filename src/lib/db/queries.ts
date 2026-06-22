@@ -14,6 +14,8 @@ import {
 
 const NON_CONTACT_SOURCE_TYPES = ["skipped", "no_contact_url"];
 import type { RawPosting } from "@/types";
+import type { ScrapeSourceStatus } from "@/types";
+import { ALL_JOB_SOURCES, jobSourceLabel, notAttemptedSourceStatus } from "@/lib/job-sources";
 import { getDb } from "./index";
 import {
   agentEvents,
@@ -544,6 +546,58 @@ export async function getDashboardStats(timeWindow = "7d") {
     sent: sent?.total ?? 0,
     replied: replied?.total ?? 0,
   };
+}
+
+export async function getLatestScrapeSourceStatuses(): Promise<ScrapeSourceStatus[]> {
+  const db = getDb();
+  const [latest] = await db
+    .select({ stats: agentRuns.stats })
+    .from(agentRuns)
+    .where(eq(agentRuns.runType, "scrape"))
+    .orderBy(desc(agentRuns.startedAt))
+    .limit(1);
+
+  const rawSources = extractSourceStatuses(latest?.stats);
+  const bySource = new Map(rawSources.map((source) => [source.source, source]));
+
+  return ALL_JOB_SOURCES.map((source) => {
+    const existing = bySource.get(source);
+    return existing ?? notAttemptedSourceStatus(source);
+  });
+}
+
+function extractSourceStatuses(
+  stats: Record<string, unknown> | null | undefined
+): ScrapeSourceStatus[] {
+  const perception =
+    stats && typeof stats === "object"
+      ? (stats.perception as Record<string, unknown> | undefined)
+      : undefined;
+  const sources = Array.isArray(perception?.sources) ? perception.sources : [];
+
+  return sources
+    .filter((source): source is Record<string, unknown> => Boolean(source))
+    .map((source) => {
+      const id = String(source.source ?? "") as RawPosting["source"];
+      const ok = source.ok === true;
+      const status =
+        source.status === "not_configured" ||
+        source.status === "rejected" ||
+        source.status === "scraped"
+          ? source.status
+          : ok
+            ? "scraped"
+            : "rejected";
+      return {
+        source: id,
+        label:
+          typeof source.label === "string" ? source.label : jobSourceLabel(id),
+        ok,
+        status,
+        count: Number(source.count ?? 0),
+        error: typeof source.error === "string" ? source.error : undefined,
+      };
+    });
 }
 
 export async function getEmailsSentPerDay(days = 30) {
