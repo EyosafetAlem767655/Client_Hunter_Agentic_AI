@@ -33,8 +33,7 @@ export function SourceStatusComparison({
               </td>
               <td className="p-4 font-mono text-xs">{source.count ?? 0}</td>
               <td className="p-4 text-xs text-muted-foreground">
-                {source.error ??
-                  (source.ok ? "Scraped successfully" : "Not attempted yet")}
+                {sourceDetail(source)}
               </td>
             </tr>
           ))}
@@ -42,6 +41,18 @@ export function SourceStatusComparison({
       </table>
     </div>
   );
+}
+
+function sourceDetail(source: ScrapeSourceStatus): string {
+  if (source.ok) return "Scraped successfully";
+  if (source.status === "not_attempted") return "Not attempted yet";
+  if (source.status === "not_configured") {
+    return source.error ?? "Missing required source configuration";
+  }
+  if (source.error?.includes("HTTP 500")) {
+    return "The job site returned HTTP 500, so this source was skipped for this run.";
+  }
+  return source.error ?? "This source rejected or blocked the scrape attempt.";
 }
 
 function StatusPill({

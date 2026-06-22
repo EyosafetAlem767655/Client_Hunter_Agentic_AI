@@ -84,15 +84,17 @@ export async function runPerception(limit: number): Promise<{
     if (source.ok) {
       await logEvent(
         "info",
-        `${engine} scraper ${source.source} returned ${source.count ?? 0} postings`
+        `${engine} scraper ${source.label} returned ${source.count ?? 0} postings`
       );
     } else {
-      const isRateLimit =
-        source.error?.includes("403") || source.error?.includes("429");
       await logEvent(
-        isRateLimit ? "warn" : "error",
-        `${engine} scraper ${source.source} failed`,
-        { error: source.error }
+        "warn",
+        `${engine} scraper ${source.label} skipped`,
+        {
+          source: source.source,
+          status: source.status,
+          error: source.error,
+        }
       );
     }
   }

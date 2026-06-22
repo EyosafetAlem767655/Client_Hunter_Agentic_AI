@@ -27,7 +27,15 @@ vi.mock("@/lib/scraper/node-runner", () => ({
       },
     ],
     scraped: 2,
-    sources: [{ source: "remoteok", ok: true, count: 2 }],
+    sources: [
+      {
+        source: "remoteok",
+        label: "RemoteOK",
+        ok: true,
+        status: "scraped",
+        count: 2,
+      },
+    ],
   }),
 }));
 
@@ -59,5 +67,46 @@ describe("perception", () => {
     expect(result.inserted).toBe(1);
     expect(result.engine).toBe("node");
     expect(result.sources).toHaveLength(1);
+  });
+
+  it("logs individual scraper HTTP failures as warnings, not pipeline errors", async () => {
+    const nodeRunner = await import("@/lib/scraper/node-runner");
+    const observability = await import("@/lib/agent/observability");
+    vi.mocked(nodeRunner.runNodeScrapers).mockResolvedValueOnce({
+      postings: [],
+      scraped: 0,
+      sources: [
+        {
+          source: "totaljobs",
+          label: "Totaljobs",
+          ok: false,
+          status: "rejected",
+          count: 0,
+          error: "HTTP 500 for https://www.totaljobs.com/jobs/virtual-assistant",
+        },
+      ],
+    });
+
+    const { runPerception } = await import("@/lib/agent/perception");
+    const result = await runPerception(10);
+
+    expect(result.sources[0]).toMatchObject({
+      source: "totaljobs",
+      ok: false,
+      status: "rejected",
+    });
+    expect(observability.logEvent).toHaveBeenCalledWith(
+      "warn",
+      "node scraper Totaljobs skipped",
+      expect.objectContaining({
+        source: "totaljobs",
+        status: "rejected",
+      })
+    );
+    expect(observability.logEvent).not.toHaveBeenCalledWith(
+      "error",
+      expect.stringContaining("Totaljobs"),
+      expect.anything()
+    );
   });
 });
