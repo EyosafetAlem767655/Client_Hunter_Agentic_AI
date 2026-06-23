@@ -191,7 +191,7 @@ describe("requested job-board scrapers", () => {
       "jobicy",
       "remoteok",
       "weworkremotely",
-      "hn",
+      "monster",
     ];
 
     vi.doMock("@/lib/scrapers", () => ({
@@ -219,7 +219,7 @@ describe("requested job-board scrapers", () => {
       "remoteok",
       "sleep:250",
       "weworkremotely",
-      "hn",
+      "monster",
     ]);
     vi.unstubAllEnvs();
   });

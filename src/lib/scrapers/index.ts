@@ -1,6 +1,5 @@
 import { env } from "@/lib/env";
 import { ArbeitnowScraper } from "./arbeitnow";
-import { HnHiringScraper } from "./hn-hiring";
 import { JobicyScraper } from "./jobicy";
 import { MonsterScraper } from "./monster";
 import { ReedScraper } from "./reed";
@@ -19,7 +18,7 @@ import type { BaseScraper } from "./base";
 /**
  * Ordered list of scrapers. We list the most cloud-IP-friendly JSON APIs
  * first (Remotive / Arbeitnow / Jobicy), then the trickier RSS / API sources
- * (WeWorkRemotely RSS, RemoteOK API, HN Hiring), then a DOM/HTML scraper as
+ * (WeWorkRemotely RSS, RemoteOK API), then a DOM/HTML scraper as
  * a last-resort fallback. `Promise.allSettled` in the runner means a single
  * blocked source can't take down the whole run.
  */
@@ -38,7 +37,6 @@ export function getEnabledScrapers(): BaseScraper[] {
     new StepStoneScraper(contact),
     new WelcomeToTheJungleScraper(contact),
     new MonsterScraper(contact),
-    new HnHiringScraper(contact),
     new WwrDomScraper(contact),
     new RejectedSourceScraper(
       "indeed",

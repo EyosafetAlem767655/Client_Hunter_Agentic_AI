@@ -17,7 +17,6 @@ describe("scraper registry", () => {
       "stepstone",
       "welcome_to_the_jungle",
       "monster",
-      "hn",
       "wwr_dom",
       "indeed",
       "ziprecruiter",

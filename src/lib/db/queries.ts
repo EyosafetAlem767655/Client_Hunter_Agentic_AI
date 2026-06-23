@@ -8,6 +8,7 @@ import {
   inArray,
   isNull,
   lt,
+  ne,
   notInArray,
   sql,
 } from "drizzle-orm";
@@ -15,7 +16,13 @@ import {
 const NON_CONTACT_SOURCE_TYPES = ["skipped", "no_contact_url"];
 import type { RawPosting } from "@/types";
 import type { ScrapeSourceStatus } from "@/types";
-import { ALL_JOB_SOURCES, jobSourceLabel, notAttemptedSourceStatus } from "@/lib/job-sources";
+import {
+  HIDDEN_JOB_SOURCES,
+  REQUESTED_JOB_SOURCES,
+  isVisibleJobSource,
+  jobSourceLabel,
+  notAttemptedSourceStatus,
+} from "@/lib/job-sources";
 import { getDb } from "./index";
 import {
   agentEvents,
@@ -29,6 +36,10 @@ import {
   settings,
   suppressionList,
 } from "./schema";
+
+function visiblePostingSource() {
+  return ne(jobPostings.source, HIDDEN_JOB_SOURCES[0]);
+}
 
 export async function upsertJobPosting(posting: RawPosting) {
   const db = getDb();
@@ -82,7 +93,7 @@ export async function listUnfilteredPostings(limit: number) {
     .select({ posting: jobPostings })
     .from(jobPostings)
     .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
-    .where(isNull(filteredJobs.id))
+    .where(and(isNull(filteredJobs.id), visiblePostingSource()))
     .limit(limit);
 }
 
@@ -123,7 +134,13 @@ export async function listTopRelevantWithoutContacts(limit: number) {
     .from(filteredJobs)
     .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
     .leftJoin(contacts, eq(contacts.postingId, jobPostings.id))
-    .where(and(eq(filteredJobs.isRelevant, true), isNull(contacts.id)))
+    .where(
+      and(
+        eq(filteredJobs.isRelevant, true),
+        isNull(contacts.id),
+        visiblePostingSource()
+      )
+    )
     .orderBy(desc(filteredJobs.score))
     .limit(limit);
   return relevant;
@@ -145,19 +162,28 @@ export async function getDiscoveryProgress(): Promise<{
   const [totalRow] = await db
     .select({ total: count() })
     .from(filteredJobs)
-    .where(eq(filteredJobs.isRelevant, true));
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
+    .where(and(eq(filteredJobs.isRelevant, true), visiblePostingSource()));
 
   // Every distinct posting that has *any* contact row, sentinels included.
   const attemptedRows = await db
     .selectDistinct({ postingId: contacts.postingId })
-    .from(contacts);
+    .from(contacts)
+    .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
+    .where(visiblePostingSource());
   const attempted = attemptedRows.length;
 
   // Only real, useful contacts (no sentinels).
   const withContactsRows = await db
     .selectDistinct({ postingId: contacts.postingId })
     .from(contacts)
-    .where(notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES));
+    .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
+    .where(
+      and(
+        notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES),
+        visiblePostingSource()
+      )
+    );
   const withContacts = withContactsRows.length;
 
   const totalRelevant = totalRow?.total ?? 0;
@@ -169,7 +195,13 @@ export async function getDiscoveryProgress(): Promise<{
     .from(filteredJobs)
     .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
     .leftJoin(contacts, eq(contacts.postingId, jobPostings.id))
-    .where(and(eq(filteredJobs.isRelevant, true), isNull(contacts.id)))
+    .where(
+      and(
+        eq(filteredJobs.isRelevant, true),
+        isNull(contacts.id),
+        visiblePostingSource()
+      )
+    )
     .orderBy(desc(filteredJobs.score))
     .limit(1);
 
@@ -220,7 +252,8 @@ export async function listJobsNeedingDraft(limit: number) {
       and(
         isNull(outreachEmails.id),
         isNotNull(contacts.email),
-        notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES)
+        notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES),
+        visiblePostingSource()
       )
     )
     .limit(limit);
@@ -258,7 +291,13 @@ export async function listApprovedOutreach(limit: number) {
     .from(outreachEmails)
     .innerJoin(contacts, eq(contacts.id, outreachEmails.contactId))
     .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
-    .where(and(eq(outreachEmails.status, "approved"), isNotNull(contacts.email)))
+    .where(
+      and(
+        eq(outreachEmails.status, "approved"),
+        isNotNull(contacts.email),
+        visiblePostingSource()
+      )
+    )
     .limit(limit);
 }
 
@@ -273,7 +312,13 @@ export async function listPendingOutreach(limit: number) {
     .from(outreachEmails)
     .innerJoin(contacts, eq(contacts.id, outreachEmails.contactId))
     .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
-    .where(and(eq(outreachEmails.status, "pending"), isNotNull(contacts.email)))
+    .where(
+      and(
+        eq(outreachEmails.status, "pending"),
+        isNotNull(contacts.email),
+        visiblePostingSource()
+      )
+    )
     .limit(limit);
 }
 
@@ -497,7 +542,9 @@ function windowStart(window: string): Date | null {
 export async function getDashboardStats(timeWindow = "7d") {
   const db = getDb();
   const since = windowStart(timeWindow);
-  const postingWhere = since ? gte(jobPostings.scrapedAt, since) : undefined;
+  const postingWhere = since
+    ? and(visiblePostingSource(), gte(jobPostings.scrapedAt, since))
+    : visiblePostingSource();
 
   const [scraped] = await db
     .select({ total: count() })
@@ -512,31 +559,52 @@ export async function getDashboardStats(timeWindow = "7d") {
   const [relevant] = await db
     .select({ total: count() })
     .from(filteredJobs)
-    .where(eq(filteredJobs.isRelevant, true));
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
+    .where(and(eq(filteredJobs.isRelevant, true), visiblePostingSource()));
 
   const [withContacts] = await db
     .select({ total: count() })
     .from(contacts)
-    .where(notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES));
+    .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
+    .where(
+      and(
+        notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES),
+        visiblePostingSource()
+      )
+    );
 
   const [drafted] = await db
     .select({ total: count() })
     .from(outreachEmails)
-    .where(since ? gte(outreachEmails.createdAt, since) : undefined);
+    .innerJoin(contacts, eq(contacts.id, outreachEmails.contactId))
+    .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
+    .where(
+      since
+        ? and(visiblePostingSource(), gte(outreachEmails.createdAt, since))
+        : visiblePostingSource()
+    );
 
   const [sent] = await db
     .select({ total: count() })
     .from(outreachEmails)
+    .innerJoin(contacts, eq(contacts.id, outreachEmails.contactId))
+    .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
     .where(
       since
-        ? and(eq(outreachEmails.status, "sent"), gte(outreachEmails.sentAt, since))
-        : eq(outreachEmails.status, "sent")
+        ? and(
+            eq(outreachEmails.status, "sent"),
+            gte(outreachEmails.sentAt, since),
+            visiblePostingSource()
+          )
+        : and(eq(outreachEmails.status, "sent"), visiblePostingSource())
     );
 
   const [replied] = await db
     .select({ total: count() })
     .from(outreachEmails)
-    .where(eq(outreachEmails.status, "replied"));
+    .innerJoin(contacts, eq(contacts.id, outreachEmails.contactId))
+    .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
+    .where(and(eq(outreachEmails.status, "replied"), visiblePostingSource()));
 
   return {
     scraped: scraped?.total ?? 0,
@@ -550,20 +618,84 @@ export async function getDashboardStats(timeWindow = "7d") {
 
 export async function getLatestScrapeSourceStatuses(): Promise<ScrapeSourceStatus[]> {
   const db = getDb();
-  const [latest] = await db
+  const runs = await db
     .select({ stats: agentRuns.stats })
     .from(agentRuns)
-    .where(eq(agentRuns.runType, "scrape"))
+    .where(and(eq(agentRuns.runType, "scrape"), eq(agentRuns.status, "completed")))
     .orderBy(desc(agentRuns.startedAt))
-    .limit(1);
+    .limit(20);
 
-  const rawSources = extractSourceStatuses(latest?.stats);
-  const bySource = new Map(rawSources.map((source) => [source.source, source]));
+  return buildLatestScrapeSourceStatuses(runs);
+}
 
-  return ALL_JOB_SOURCES.map((source) => {
+export function buildLatestScrapeSourceStatuses(
+  runs: Array<{ stats: Record<string, unknown> | null | undefined }>
+): ScrapeSourceStatus[] {
+  let bySource = new Map<RawPosting["source"], ScrapeSourceStatus>();
+  for (const run of runs) {
+    bySource = groupDashboardSourceStatuses(extractSourceStatuses(run.stats));
+    if (bySource.size > 0) break;
+  }
+
+  return REQUESTED_JOB_SOURCES.map((source) => {
     const existing = bySource.get(source);
     return existing ?? notAttemptedSourceStatus(source);
   });
+}
+
+function groupDashboardSourceStatuses(
+  sources: ScrapeSourceStatus[]
+): Map<RawPosting["source"], ScrapeSourceStatus> {
+  const bySource = new Map<RawPosting["source"], ScrapeSourceStatus>();
+  for (const source of sources) {
+    if (!isVisibleJobSource(source.source)) continue;
+    const canonicalSource = dashboardSourceFor(source.source);
+    if (!REQUESTED_JOB_SOURCES.includes(canonicalSource)) continue;
+
+    const normalized: ScrapeSourceStatus = {
+      ...source,
+      source: canonicalSource,
+      label: jobSourceLabel(canonicalSource),
+    };
+    const existing = bySource.get(canonicalSource);
+    bySource.set(
+      canonicalSource,
+      existing ? mergeSourceStatuses(existing, normalized) : normalized
+    );
+  }
+  return bySource;
+}
+
+function dashboardSourceFor(source: RawPosting["source"]): RawPosting["source"] {
+  return source === "wwr_dom" ? "weworkremotely" : source;
+}
+
+function mergeSourceStatuses(
+  left: ScrapeSourceStatus,
+  right: ScrapeSourceStatus
+): ScrapeSourceStatus {
+  const count = (left.count ?? 0) + (right.count ?? 0);
+  if (left.ok || right.ok) {
+    return {
+      source: left.source,
+      label: left.label,
+      ok: true,
+      status: "scraped",
+      count,
+    };
+  }
+  const status =
+    left.status === "not_configured" || right.status === "not_configured"
+      ? "not_configured"
+      : "rejected";
+  return {
+    source: left.source,
+    label: left.label,
+    ok: false,
+    status,
+    count,
+    error: [left.error, right.error].filter(Boolean).join("; ") || undefined,
+  };
 }
 
 function extractSourceStatuses(
@@ -610,10 +742,13 @@ export async function getEmailsSentPerDay(days = 30) {
       total: count(),
     })
     .from(outreachEmails)
+    .innerJoin(contacts, eq(contacts.id, outreachEmails.contactId))
+    .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
     .where(
       and(
         eq(outreachEmails.status, "sent"),
-        gte(outreachEmails.sentAt, since)
+        gte(outreachEmails.sentAt, since),
+        visiblePostingSource()
       )
     )
     .groupBy(sql`date_trunc('day', ${outreachEmails.sentAt})::date`);
@@ -643,13 +778,13 @@ export async function listJobsPaginated(params: {
 
   if (params.status === "unfiltered") {
     const where = since
-      ? gte(jobPostings.scrapedAt, since)
-      : undefined;
+      ? and(visiblePostingSource(), gte(jobPostings.scrapedAt, since))
+      : visiblePostingSource();
     const rows = await db
       .select({ posting: jobPostings })
       .from(jobPostings)
       .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
-      .where(where ? and(isNull(filteredJobs.id), where) : isNull(filteredJobs.id))
+      .where(and(isNull(filteredJobs.id), where))
       .orderBy(desc(jobPostings.scrapedAt))
       .limit(params.pageSize)
       .offset(offset);
@@ -658,7 +793,10 @@ export async function listJobsPaginated(params: {
 
   if (params.status === "with-contact") {
     // No time window — these are pipeline rows, not events.
-    const where = notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES);
+    const where = and(
+      notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES),
+      visiblePostingSource()
+    );
     const items = await db
       .select({
         posting: jobPostings,
@@ -675,13 +813,16 @@ export async function listJobsPaginated(params: {
     const [totalRow] = await db
       .select({ total: count() })
       .from(contacts)
+      .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
       .where(where);
     return { items, total: totalRow?.total ?? 0 };
   }
 
   // No status param → "all jobs scraped in window" view; left-join filtered.
   if (!params.status || params.status === "all") {
-    const where = since ? gte(jobPostings.scrapedAt, since) : undefined;
+    const where = since
+      ? and(visiblePostingSource(), gte(jobPostings.scrapedAt, since))
+      : visiblePostingSource();
     const items = await db
       .select({ posting: jobPostings, filtered: filteredJobs })
       .from(jobPostings)
@@ -697,7 +838,7 @@ export async function listJobsPaginated(params: {
     return { items, total: totalRow?.total ?? 0 };
   }
 
-  const conditions = [];
+  const conditions = [visiblePostingSource()];
   if (params.minScore !== undefined) {
     conditions.push(gte(filteredJobs.score, params.minScore));
   }
@@ -725,6 +866,7 @@ export async function listJobsPaginated(params: {
   const [totalRow] = await db
     .select({ total: count() })
     .from(filteredJobs)
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
     .where(where);
 
   return { items, total: totalRow?.total ?? 0 };
@@ -796,7 +938,7 @@ export async function listOutreachPaginated(params: {
   const offset = (params.page - 1) * params.pageSize;
   const since = params.timeWindow ? windowStart(params.timeWindow) : null;
 
-  const filters = [] as Array<ReturnType<typeof eq>>;
+  const filters = [visiblePostingSource()] as Array<ReturnType<typeof eq>>;
   if (params.status) {
     filters.push(eq(outreachEmails.status, params.status));
   }
@@ -827,6 +969,8 @@ export async function listOutreachPaginated(params: {
   const [totalRow] = await db
     .select({ total: count() })
     .from(outreachEmails)
+    .innerJoin(contacts, eq(contacts.id, outreachEmails.contactId))
+    .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
     .where(where);
 
   return { items, total: totalRow?.total ?? 0 };
