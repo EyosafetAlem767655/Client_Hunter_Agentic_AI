@@ -1,4 +1,5 @@
 import type { RawPosting } from "@/types";
+import { prioritizeTargetPostings } from "@/lib/job-relevance";
 import { BaseScraper } from "./base";
 
 interface HnSearchHit {
@@ -38,9 +39,8 @@ export class HnHiringScraper extends BaseScraper {
 
     const postings: RawPosting[] = [];
     const walk = (comments: HnComment[] | undefined) => {
-      if (!comments || postings.length >= limit) return;
+      if (!comments) return;
       for (const comment of comments) {
-        if (postings.length >= limit) return;
         const text = comment.text ?? "";
         if (text.length < 40) {
           walk(comment.children);
@@ -66,6 +66,6 @@ export class HnHiringScraper extends BaseScraper {
     };
 
     walk(thread.children);
-    return postings.slice(0, limit);
+    return prioritizeTargetPostings(postings, limit);
   }
 }

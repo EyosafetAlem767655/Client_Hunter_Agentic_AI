@@ -1,13 +1,12 @@
 import * as cheerio from "cheerio";
 import type { RawPosting } from "@/types";
+import { prioritizeTargetPostings } from "@/lib/job-relevance";
 import { BaseScraper } from "./base";
 
 const FEEDS = [
-  "https://weworkremotely.com/categories/remote-programming-jobs.rss",
-  "https://weworkremotely.com/categories/remote-design-jobs.rss",
   "https://weworkremotely.com/categories/remote-customer-support-jobs.rss",
-  "https://weworkremotely.com/categories/remote-devops-sysadmin-jobs.rss",
   "https://weworkremotely.com/categories/remote-sales-marketing-jobs.rss",
+  "https://weworkremotely.com/categories/remote-business-exec-management-jobs.rss",
 ];
 
 export class WeWorkRemotelyScraper extends BaseScraper {
@@ -53,6 +52,6 @@ export class WeWorkRemotelyScraper extends BaseScraper {
       });
     }
 
-    return postings.slice(0, limit);
+    return prioritizeTargetPostings(postings, limit);
   }
 }

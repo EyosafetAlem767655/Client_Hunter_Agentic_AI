@@ -26,6 +26,8 @@ describe("va-filter", () => {
     expect(isLikelyVaRole(p({ title: "Virtual Assistant" }))).toBe(true);
     expect(isLikelyVaRole(p({ title: "Executive Assistant" }))).toBe(true);
     expect(isLikelyVaRole(p({ title: "Customer Support Agent" }))).toBe(true);
+    expect(isLikelyVaRole(p({ title: "Member Experience Associate" }))).toBe(true);
+    expect(isLikelyVaRole(p({ title: "Recruiting Coordinator" }))).toBe(true);
   });
 
   it("rejects engineering / senior tech roles", () => {

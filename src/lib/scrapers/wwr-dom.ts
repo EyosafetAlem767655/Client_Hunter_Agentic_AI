@@ -11,8 +11,11 @@ import { BaseScraper } from "./base";
  */
 const CATEGORY_URLS = [
   "https://weworkremotely.com/categories/remote-customer-support-jobs",
+  "https://weworkremotely.com/remote-jobs/search?term=customer+success",
   "https://weworkremotely.com/remote-jobs/search?term=virtual+assistant",
   "https://weworkremotely.com/remote-jobs/search?term=executive+assistant",
+  "https://weworkremotely.com/remote-jobs/search?term=data+entry",
+  "https://weworkremotely.com/remote-jobs/search?term=operations+assistant",
   "https://weworkremotely.com/categories/remote-business-exec-management-jobs",
 ];
 

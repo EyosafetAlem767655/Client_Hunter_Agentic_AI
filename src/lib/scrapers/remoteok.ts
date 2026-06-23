@@ -1,4 +1,5 @@
 import type { RawPosting } from "@/types";
+import { prioritizeTargetPostings } from "@/lib/job-relevance";
 import { BaseScraper } from "./base";
 
 interface RemoteOkJob {
@@ -25,9 +26,8 @@ export class RemoteOkScraper extends BaseScraper {
 
     const response = await this.fetchWithRetry(`${origin}/api`);
     const data = (await response.json()) as RemoteOkJob[];
-    const jobs = data.slice(1, limit + 1);
-
-    return jobs.map((job) => {
+    const jobs = data.slice(1);
+    const postings = jobs.map((job) => {
       const externalId = String(job.id ?? job.slug ?? "");
       const url = job.url ?? `${origin}/remote-jobs/${job.slug ?? externalId}`;
       return {
@@ -42,5 +42,7 @@ export class RemoteOkScraper extends BaseScraper {
         raw: job as Record<string, unknown>,
       };
     });
+
+    return prioritizeTargetPostings(postings, limit);
   }
 }

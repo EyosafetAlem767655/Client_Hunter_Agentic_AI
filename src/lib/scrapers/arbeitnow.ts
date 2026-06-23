@@ -1,4 +1,5 @@
 import type { RawPosting } from "@/types";
+import { prioritizeTargetPostings } from "@/lib/job-relevance";
 import { BaseScraper } from "./base";
 
 interface ArbeitnowJob {
@@ -39,7 +40,7 @@ export class ArbeitnowScraper extends BaseScraper {
       try {
         const res = await this.fetchWithRetry(url);
         const data = (await res.json()) as ArbeitnowResponse;
-        return (data.data ?? []).slice(0, limit).map((job) => ({
+        const postings = (data.data ?? []).map((job) => ({
           source: "arbeitnow" as const,
           externalId: job.slug,
           url: job.url,
@@ -50,6 +51,7 @@ export class ArbeitnowScraper extends BaseScraper {
           postedAt: job.created_at ? new Date(job.created_at * 1000) : null,
           raw: job as unknown as Record<string, unknown>,
         }));
+        return prioritizeTargetPostings(postings, limit);
       } catch {
         // Try the next URL variant
       }

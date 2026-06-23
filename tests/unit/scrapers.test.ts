@@ -46,6 +46,44 @@ describe("scrapers", () => {
     expect(postings[0].company).toBe("Acme Corp");
   });
 
+  it("prioritizes relevant RemoteOK roles before slicing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string) => {
+        if (String(url).includes("robots.txt")) {
+          return { ok: true, status: 200, text: async () => "" };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            { legal: "Remote OK API terms" },
+            {
+              id: "engineer-1",
+              slug: "senior-engineer",
+              position: "Senior Engineer",
+              company: "BuildCo",
+              location: "Remote",
+              description: "Build APIs.",
+            },
+            {
+              id: "support-1",
+              slug: "customer-support-specialist",
+              position: "Customer Support Specialist",
+              company: "HelpCo",
+              location: "Remote",
+              description: "Handle customer tickets in Zendesk.",
+            },
+          ],
+        };
+      })
+    );
+
+    const postings = await new RemoteOkScraper("bot@example.com").fetch(1);
+    expect(postings).toHaveLength(1);
+    expect(postings[0].externalId).toBe("support-1");
+  });
+
   it("parses WeWorkRemotely RSS fixture", async () => {
     const xml = readFileSync(join(fixtures, "wwr.xml"), "utf-8");
     vi.stubGlobal(

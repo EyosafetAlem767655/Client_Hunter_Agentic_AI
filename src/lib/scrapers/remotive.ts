@@ -36,9 +36,15 @@ export class RemotiveScraper extends BaseScraper {
       `https://remotive.com/api/remote-jobs?search=virtual+assistant&limit=${limit}`,
       `https://remotive.com/api/remote-jobs?search=executive+assistant&limit=${limit}`,
       `https://remotive.com/api/remote-jobs?search=administrative+assistant&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=customer+service&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=technical+support&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=client+support&limit=${limit}`,
       `https://remotive.com/api/remote-jobs?search=data+entry&limit=${limit}`,
       `https://remotive.com/api/remote-jobs?search=appointment+setter&limit=${limit}`,
       `https://remotive.com/api/remote-jobs?search=customer+success&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=recruiting+coordinator&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=billing+specialist&limit=${limit}`,
+      `https://remotive.com/api/remote-jobs?search=sales+development+representative&limit=${limit}`,
     ];
 
     const seen = new Set<string>();

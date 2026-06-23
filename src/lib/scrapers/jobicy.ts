@@ -34,9 +34,12 @@ export class JobicyScraper extends BaseScraper {
     const tagQueries = [
       "virtual-assistant",
       "customer-service",
+      "customer-support",
       "administrative",
       "operations",
       "data-entry",
+      "hr",
+      "finance",
       "social-media",
       "sales",
       "marketing",

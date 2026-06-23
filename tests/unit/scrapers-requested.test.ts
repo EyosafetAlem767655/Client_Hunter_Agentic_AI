@@ -177,7 +177,50 @@ describe("requested job-board scrapers", () => {
 
     await runNodeScrapers(150);
 
-    expect(fetchWithinBudget).toHaveBeenCalledWith(15, 8_000);
+    expect(fetchWithinBudget).toHaveBeenCalledWith(40, 8_000);
+    vi.unstubAllEnvs();
+  });
+
+  it("runs Vercel scrapers in small waves with a pause between waves", async () => {
+    vi.resetModules();
+    vi.stubEnv("VERCEL", "1");
+    const events: string[] = [];
+    const sources: RawPosting["source"][] = [
+      "remotive",
+      "arbeitnow",
+      "jobicy",
+      "remoteok",
+      "weworkremotely",
+      "hn",
+    ];
+
+    vi.doMock("@/lib/scrapers", () => ({
+      getEnabledScrapers: () =>
+        sources.map((source) => ({
+          source,
+          fetchWithinBudget: vi.fn(async () => {
+            events.push(source);
+            return [];
+          }),
+        })),
+    }));
+    const { sleep } = await import("@/lib/utils");
+    vi.mocked(sleep).mockImplementation(async (ms) => {
+      events.push(`sleep:${ms}`);
+    });
+    const { runNodeScrapers } = await import("@/lib/scraper/node-runner");
+
+    await runNodeScrapers(150);
+
+    expect(events).toEqual([
+      "remotive",
+      "arbeitnow",
+      "jobicy",
+      "remoteok",
+      "sleep:250",
+      "weworkremotely",
+      "hn",
+    ]);
     vi.unstubAllEnvs();
   });
 
