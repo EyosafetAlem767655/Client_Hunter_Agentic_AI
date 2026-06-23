@@ -71,6 +71,12 @@ describe("dashboard source statuses", () => {
                 error: "Direct scraping disabled",
               },
               {
+                source: "remotive",
+                ok: true,
+                status: "scraped",
+                count: 4,
+              },
+              {
                 source: "hn",
                 ok: true,
                 status: "scraped",
@@ -82,7 +88,10 @@ describe("dashboard source statuses", () => {
       },
     ]);
 
-    expect(statuses.map((source) => source.source)).toEqual(REQUESTED_JOB_SOURCES);
+    expect(statuses.map((source) => source.source)).toEqual([
+      ...REQUESTED_JOB_SOURCES,
+      "remotive",
+    ]);
     expect(statuses.some((source) => source.source === "wwr_dom")).toBe(false);
     expect(statuses.some((source) => source.source === "hn")).toBe(false);
     expect(statuses.find((source) => source.source === "weworkremotely")).toMatchObject({
@@ -100,6 +109,11 @@ describe("dashboard source statuses", () => {
     });
     expect(statuses.find((source) => source.source === "wellfound")).toMatchObject({
       status: "not_attempted",
+    });
+    expect(statuses.find((source) => source.source === "remotive")).toMatchObject({
+      ok: true,
+      status: "scraped",
+      count: 4,
     });
   });
 });

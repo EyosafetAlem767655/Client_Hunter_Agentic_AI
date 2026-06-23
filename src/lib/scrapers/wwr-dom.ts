@@ -21,7 +21,7 @@ const CATEGORY_URLS = [
 
 export class WwrDomScraper extends BaseScraper {
   constructor(contactEmail: string) {
-    super("wwr_dom", contactEmail);
+    super("weworkremotely", contactEmail);
     this.acceptHeader = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
   }
 
@@ -74,7 +74,7 @@ export class WwrDomScraper extends BaseScraper {
           if (!title) continue;
 
           out.push({
-            source: "wwr_dom",
+            source: "weworkremotely",
             externalId: this.hashId(fullUrl),
             url: fullUrl,
             title,

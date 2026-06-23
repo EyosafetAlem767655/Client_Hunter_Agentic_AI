@@ -114,6 +114,54 @@ describe("ArbeitnowScraper", () => {
     expect(out[1].location).toBe("Paris, France");
   });
 
+  it("follows Arbeitnow pagination before prioritizing matching roles", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("page=2")) {
+          return jsonResponse({
+            data: [
+              {
+                slug: "support-remote",
+                company_name: "SupportCo",
+                title: "Customer Support Specialist",
+                description: "Remote support tickets for European customers.",
+                remote: true,
+                url: "https://www.arbeitnow.com/jobs/support-remote",
+                tags: ["support"],
+                job_types: ["full-time"],
+                location: "Remote",
+                created_at: 1700002000,
+              },
+            ],
+            links: { next: null },
+          });
+        }
+        return jsonResponse({
+          data: [
+            {
+              slug: "engineer-berlin",
+              company_name: "BuildCo",
+              title: "Senior Engineer",
+              description: "Build APIs.",
+              remote: true,
+              url: "https://www.arbeitnow.com/jobs/engineer-berlin",
+              tags: ["engineering"],
+              job_types: ["full-time"],
+              location: "Berlin, Germany",
+              created_at: 1700001000,
+            },
+          ],
+          links: { next: "https://www.arbeitnow.com/api/job-board-api?page=2" },
+        });
+      })
+    );
+
+    const out = await new ArbeitnowScraper("bot@example.com").fetch(1);
+    expect(out).toHaveLength(1);
+    expect(out[0].externalId).toBe("support-remote");
+  });
+
   it("falls back to alternate URL on first failure", async () => {
     let call = 0;
     vi.stubGlobal(
@@ -215,7 +263,7 @@ describe("WwrDomScraper", () => {
 
     const out = await new WwrDomScraper("bot@example.com").fetch(10);
     expect(out.length).toBeGreaterThanOrEqual(2);
-    expect(out[0].source).toBe("wwr_dom");
+    expect(out[0].source).toBe("weworkremotely");
     expect(out[0].url).toMatch(/^https:\/\/weworkremotely\.com\/remote-jobs\//);
     expect(out[0].title).toBeTruthy();
   });

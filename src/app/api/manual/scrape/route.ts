@@ -24,7 +24,8 @@ export async function POST(request: Request) {
     // also still sends it automatically.
     const summary = await runScrapePipeline({
       sendDigest: false,
-      filterLimit: 0,
+      filterLimit: 8,
+      filterMaxBatches: 1,
     });
     return NextResponse.json({ ok: true, ...summary });
   } catch (error) {

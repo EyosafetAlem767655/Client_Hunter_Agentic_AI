@@ -10,16 +10,15 @@ import { RemotiveScraper } from "./remotive";
 import { StepStoneScraper } from "./stepstone";
 import { TotaljobsScraper } from "./totaljobs";
 import { WelcomeToTheJungleScraper } from "./welcome-to-the-jungle";
-import { WeWorkRemotelyScraper } from "./weworkremotely";
 import { WellfoundScraper } from "./wellfound";
 import { WwrDomScraper } from "./wwr-dom";
 import type { BaseScraper } from "./base";
 
 /**
  * Ordered list of scrapers. We list the most cloud-IP-friendly JSON APIs
- * first (Remotive / Arbeitnow / Jobicy), then the trickier RSS / API sources
- * (WeWorkRemotely RSS, RemoteOK API), then a DOM/HTML scraper as
- * a last-resort fallback. `Promise.allSettled` in the runner means a single
+ * first (Remotive / Arbeitnow / Jobicy), then the trickier requested boards.
+ * We use the WeWorkRemotely HTML scraper as the single active WWR source so
+ * the same board is not ingested twice. `Promise.allSettled` means a single
  * blocked source can't take down the whole run.
  */
 export function getEnabledScrapers(): BaseScraper[] {
@@ -30,14 +29,13 @@ export function getEnabledScrapers(): BaseScraper[] {
     new JobicyScraper(contact),
     new ReedScraper(contact),
     new RemoteCoScraper(contact),
-    new WeWorkRemotelyScraper(contact),
+    new WwrDomScraper(contact),
     new RemoteOkScraper(contact),
     new WellfoundScraper(contact),
     new TotaljobsScraper(contact),
     new StepStoneScraper(contact),
     new WelcomeToTheJungleScraper(contact),
     new MonsterScraper(contact),
-    new WwrDomScraper(contact),
     new RejectedSourceScraper(
       "indeed",
       contact,

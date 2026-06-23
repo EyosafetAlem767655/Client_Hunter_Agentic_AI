@@ -637,7 +637,12 @@ export function buildLatestScrapeSourceStatuses(
     if (bySource.size > 0) break;
   }
 
-  return REQUESTED_JOB_SOURCES.map((source) => {
+  const orderedSources = [...REQUESTED_JOB_SOURCES];
+  for (const source of Array.from(bySource.keys())) {
+    if (!orderedSources.includes(source)) orderedSources.push(source);
+  }
+
+  return orderedSources.map((source) => {
     const existing = bySource.get(source);
     return existing ?? notAttemptedSourceStatus(source);
   });
@@ -650,7 +655,6 @@ function groupDashboardSourceStatuses(
   for (const source of sources) {
     if (!isVisibleJobSource(source.source)) continue;
     const canonicalSource = dashboardSourceFor(source.source);
-    if (!REQUESTED_JOB_SOURCES.includes(canonicalSource)) continue;
 
     const normalized: ScrapeSourceStatus = {
       ...source,
