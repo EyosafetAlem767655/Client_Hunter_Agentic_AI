@@ -74,7 +74,7 @@ export class WwrDomScraper extends BaseScraper {
           if (!title) continue;
 
           out.push({
-            source: "weworkremotely",
+            source: this.source,
             externalId: this.hashId(fullUrl),
             url: fullUrl,
             title,

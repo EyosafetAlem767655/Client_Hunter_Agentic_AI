@@ -3,6 +3,8 @@ import { ArbeitnowScraper } from "@/lib/scrapers/arbeitnow";
 import { JobicyScraper } from "@/lib/scrapers/jobicy";
 import { RemotiveScraper } from "@/lib/scrapers/remotive";
 import { WwrDomScraper } from "@/lib/scrapers/wwr-dom";
+import { IndeedScraper } from "@/lib/scrapers/indeed";
+import { scraperForSource, ENABLED_SOURCES } from "@/lib/scrapers";
 
 vi.mock("@/lib/utils", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/utils")>();
@@ -263,7 +265,7 @@ describe("WwrDomScraper", () => {
 
     const out = await new WwrDomScraper("bot@example.com").fetch(10);
     expect(out.length).toBeGreaterThanOrEqual(2);
-    expect(out[0].source).toBe("weworkremotely");
+    expect(out[0].source).toBe("wwr_dom");
     expect(out[0].url).toMatch(/^https:\/\/weworkremotely\.com\/remote-jobs\//);
     expect(out[0].title).toBeTruthy();
   });
@@ -275,5 +277,119 @@ describe("WwrDomScraper", () => {
     );
     const out = await new WwrDomScraper("bot@example.com").fetch(5);
     expect(out).toEqual([]);
+  });
+});
+
+describe("IndeedScraper", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("parses jobs from embedded mosaic JSON", async () => {
+    const mosaicData = {
+      metaData: {
+        mosaicProviderJobCardsModel: {
+          results: [
+            {
+              jobkey: "abc123",
+              displayTitle: "Virtual Assistant",
+              company: "VirtualCo",
+              jobLocationCity: "Austin",
+              jobLocationState: "TX",
+              snippet: "Support our exec team remotely.",
+              pubDate: 1700000000000,
+            },
+            {
+              jobkey: "def456",
+              displayTitle: "Customer Support Specialist",
+              company: "HelpDesk Inc",
+              jobLocationCity: null,
+              jobLocationState: null,
+              snippet: "Handle tickets via Zendesk.",
+              pubDate: 1700001000000,
+            },
+          ],
+        },
+      },
+    };
+    const html = `<html><body><script>
+      window.mosaic.providerData["mosaic-provider-jobcards"] = ${JSON.stringify(mosaicData)};
+    </script></body></html>`;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string) => {
+        if (String(url).includes("robots.txt")) {
+          return { ok: true, status: 200, text: async () => "" };
+        }
+        return { ok: true, status: 200, text: async () => html };
+      })
+    );
+
+    const out = await new IndeedScraper("bot@example.com").fetch(10);
+    expect(out.length).toBeGreaterThanOrEqual(2);
+    expect(out[0].source).toBe("indeed");
+    expect(out[0].externalId).toBe("abc123");
+    expect(out[0].title).toBe("Virtual Assistant");
+    expect(out[0].company).toBe("VirtualCo");
+    expect(out[0].url).toBe("https://www.indeed.com/viewjob?jk=abc123");
+    expect(out[0].postedAt).toBeInstanceOf(Date);
+    expect(out[1].location).toBe("Remote");
+  });
+
+  it("falls back to HTML card parsing when mosaic JSON is absent", async () => {
+    const html = `<html><body>
+      <div data-testid="slider_item">
+        <h2 class="jobTitle"><a href="/rc/clk?jk=xyz789">Customer Service Rep</a></h2>
+        <span class="companyName">ServiceCo</span>
+        <div class="companyLocation">Remote</div>
+        <div class="job-snippet">Handle inbound customer queries.</div>
+      </div>
+    </body></html>`;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string) => {
+        if (String(url).includes("robots.txt")) {
+          return { ok: true, status: 200, text: async () => "" };
+        }
+        return { ok: true, status: 200, text: async () => html };
+      })
+    );
+
+    const out = await new IndeedScraper("bot@example.com").fetch(10);
+    expect(out.length).toBeGreaterThanOrEqual(1);
+    expect(out[0].source).toBe("indeed");
+    expect(out[0].title).toBe("Customer Service Rep");
+  });
+
+  it("throws ScraperRejectedError when page yields no postings", async () => {
+    const html = "<html><body><p>We could not find any jobs.</p></body></html>";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string) => {
+        if (String(url).includes("robots.txt")) {
+          return { ok: true, status: 200, text: async () => "" };
+        }
+        return { ok: true, status: 200, text: async () => html };
+      })
+    );
+
+    await expect(new IndeedScraper("bot@example.com").fetch(10)).rejects.toThrow(
+      /Indeed returned no parseable postings/
+    );
+  });
+});
+
+describe("scraperForSource", () => {
+  it("returns a scraper instance for every enabled source", () => {
+    for (const source of ENABLED_SOURCES) {
+      const scraper = scraperForSource(source);
+      expect(scraper, `scraperForSource("${source}") should not be null`).not.toBeNull();
+      expect(scraper!.source).toBe(source);
+    }
+  });
+
+  it("returns null for unknown sources", () => {
+    // @ts-expect-error testing invalid input
+    expect(scraperForSource("unknown_board")).toBeNull();
   });
 });
