@@ -38,7 +38,9 @@ import {
 } from "./schema";
 
 function visiblePostingSource() {
-  return ne(jobPostings.source, HIDDEN_JOB_SOURCES[0]);
+  if (HIDDEN_JOB_SOURCES.length === 0) return sql`true`;
+  if (HIDDEN_JOB_SOURCES.length === 1) return ne(jobPostings.source, HIDDEN_JOB_SOURCES[0]);
+  return notInArray(jobPostings.source, [...HIDDEN_JOB_SOURCES]);
 }
 
 export async function upsertJobPosting(posting: RawPosting) {

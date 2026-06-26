@@ -41,10 +41,10 @@ export const REQUESTED_JOB_SOURCES = Object.entries(JOB_SOURCE_META)
   .map(([source]) => source as JobSource);
 
 export const ALL_JOB_SOURCES = Object.keys(JOB_SOURCE_META) as JobSource[];
-export const HIDDEN_JOB_SOURCES = [] as const;
+export const HIDDEN_JOB_SOURCES: readonly string[] = [];
 
 export function isVisibleJobSource(source: string): boolean {
-  return !HIDDEN_JOB_SOURCES.includes(source as never);
+  return !HIDDEN_JOB_SOURCES.includes(source);
 }
 
 export function jobSourceLabel(source: string): string {
