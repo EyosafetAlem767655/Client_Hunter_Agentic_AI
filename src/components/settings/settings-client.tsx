@@ -8,6 +8,7 @@ import {
   AlertCircle,
   AlertTriangle,
   CheckCircle2,
+  CircleDashed,
   Eye,
   EyeOff,
   FileText,
@@ -21,9 +22,28 @@ import {
   Square,
   Trash2,
   Wand2,
+  XCircle,
 } from "lucide-react";
+import { ENABLED_SOURCES, jobSourceLabel } from "@/lib/job-sources";
 
 const TOKEN_KEY = "talentbridge_admin_token";
+
+interface SourceResult {
+  source: string;
+  label: string;
+  ok: boolean;
+  count: number;
+  durationMs?: number;
+  error?: string;
+}
+
+interface ScrapeProgress {
+  phase: "idle" | "scraping" | "filtering" | "done";
+  currentSource: string | null;
+  currentLabel: string | null;
+  completed: SourceResult[];
+  remaining: string[];
+}
 
 interface RunResult {
   label: string;
@@ -48,6 +68,13 @@ export function SettingsClient({
   );
   const [loading, setLoading] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState<RunResult | null>(null);
+  const [scrapeProgress, setScrapeProgress] = useState<ScrapeProgress>({
+    phase: "idle",
+    currentSource: null,
+    currentLabel: null,
+    completed: [],
+    remaining: [],
+  });
 
   // 1-by-1 contact-discovery loop state.
   const [discoveryProgress, setDiscoveryProgress] = useState<{
@@ -214,6 +241,133 @@ export function SettingsClient({
     }
 
     return { processed, succeeded, relevant, steps };
+  }
+
+  async function runScrapeSequential() {
+    if (!token.trim()) {
+      showToast("err", "Unauthorized — enter ADMIN_TOKEN first.");
+      return;
+    }
+    const sources = ENABLED_SOURCES;
+    setScrapeProgress({
+      phase: "scraping",
+      currentSource: null,
+      currentLabel: null,
+      completed: [],
+      remaining: [...sources],
+    });
+    setLoading("Scrape");
+
+    const completed: SourceResult[] = [];
+
+    for (const source of sources) {
+      const label = jobSourceLabel(source);
+      setScrapeProgress((prev) => ({
+        ...prev,
+        currentSource: source,
+        currentLabel: label,
+        remaining: prev.remaining.filter((s) => s !== source),
+      }));
+
+      try {
+        const res = await fetch("/api/manual/scrape/source", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token.trim()}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ source }),
+        });
+        const data: {
+          ok?: boolean;
+          count?: number;
+          durationMs?: number;
+          error?: string;
+        } = await res.json().catch(() => ({}));
+
+        const result: SourceResult = {
+          source,
+          label,
+          ok: data.ok ?? false,
+          count: data.count ?? 0,
+          durationMs: data.durationMs,
+          error: data.error,
+        };
+        completed.push(result);
+        setScrapeProgress((prev) => ({
+          ...prev,
+          completed: [...prev.completed, result],
+        }));
+      } catch (e) {
+        const result: SourceResult = {
+          source,
+          label,
+          ok: false,
+          count: 0,
+          error: e instanceof Error ? e.message : "Request failed",
+        };
+        completed.push(result);
+        setScrapeProgress((prev) => ({
+          ...prev,
+          completed: [...prev.completed, result],
+        }));
+      }
+    }
+
+    // All sites scraped — run LLM relevance filter
+    setScrapeProgress((prev) => ({
+      ...prev,
+      phase: "filtering",
+      currentSource: null,
+      currentLabel: null,
+    }));
+    setLoading("Filter");
+
+    let filter = { processed: 0, relevant: 0 };
+    try {
+      filter = await runFilterLoop();
+    } catch {
+      /* filter errors are shown via toast inside runFilterLoop */
+    }
+
+    // Refresh discovery progress bar
+    try {
+      const res = await fetch("/api/manual/discover/status", {
+        headers: { Authorization: `Bearer ${token.trim()}` },
+      });
+      if (res.ok) {
+        const p = await res.json();
+        if (p?.ok) {
+          setDiscoveryProgress({
+            totalRelevant: p.totalRelevant ?? 0,
+            withContacts: p.withContacts ?? 0,
+            attempted: p.attempted ?? 0,
+            skipped: p.skipped ?? 0,
+            pending: p.pending ?? 0,
+            nextCompany: p.nextCompany ?? null,
+          });
+        }
+      }
+    } catch {
+      /* swallow */
+    }
+
+    setScrapeProgress((prev) => ({ ...prev, phase: "done" }));
+    setLoading(null);
+
+    const succeeded = completed.filter((r) => r.ok).length;
+    const totalCount = completed.reduce((s, r) => s + r.count, 0);
+    showToast(
+      "ok",
+      `Scrape done — ${succeeded}/${completed.length} sites · ${totalCount} postings · ${filter.relevant} relevant — auto-discovery in 60 s`
+    );
+    setLastRun({
+      label: "Scrape + filter",
+      ok: true,
+      data: { sources: completed, filter },
+      at: Date.now(),
+    });
+    void scheduleEmailLoopAfterScrape();
   }
 
   async function runManual(
@@ -668,63 +822,17 @@ export function SettingsClient({
           </CardHeader>
           <CardContent className="space-y-5">
             <p className="text-sm text-muted-foreground">
-              Cron runs <strong>daily at 06:00 UTC</strong> (scrape) and{" "}
-              <strong>14:00 UTC</strong> (outreach) on Vercel Hobby. Use the buttons
-              below to trigger a run on demand.
+              Use the buttons below to run the pipeline on demand. Scraping runs
+              site-by-site in sequence so you can watch live progress for each
+              platform.
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <ActionTile
                 title="Run scrape + filter"
-                description="Scrapes job boards, then runs the OpenAI relevance filter in small batches. When filtering returns, a 60-second countdown starts and the 1-by-1 contact loop kicks off automatically."
+                description="Scrapes each job board one by one (watch live progress below), then runs the OpenAI relevance filter. A 60-second countdown starts afterwards and the contact loop kicks off automatically."
                 disabled={loading !== null || scrapeCountdown !== null}
                 loading={loading === "Scrape" || loading === "Filter"}
-                onClick={() =>
-                  runManual("/api/manual/scrape", "Scrape", {
-                    after: async (data) => {
-                      showToast("ok", "Jobs scraped - filtering relevance now");
-                      const filter = await runFilterLoop();
-                      // Refresh the discovery progress so the bar shows
-                      // the new pending count immediately.
-                      try {
-                        const res = await fetch(
-                          "/api/manual/discover/status",
-                          {
-                            headers: {
-                              Authorization: `Bearer ${token.trim()}`,
-                            },
-                          }
-                        );
-                        if (res.ok) {
-                          const p = await res.json();
-                          if (p?.ok) {
-                            setDiscoveryProgress({
-                              totalRelevant: p.totalRelevant ?? 0,
-                              withContacts: p.withContacts ?? 0,
-                              attempted: p.attempted ?? 0,
-                              skipped: p.skipped ?? 0,
-                              pending: p.pending ?? 0,
-                              nextCompany: p.nextCompany ?? null,
-                            });
-                          }
-                        }
-                      } catch {
-                        /* swallow */
-                      }
-                      showToast(
-                        "ok",
-                        `Scrape + filter done - ${filter.relevant} relevant - auto-discovery in 60 s`
-                      );
-                      setLastRun({
-                        label: "Scrape + filter",
-                        ok: true,
-                        data: { scrape: data, filter },
-                        at: Date.now(),
-                      });
-                      // Don't block the response — fire and forget.
-                      void scheduleEmailLoopAfterScrape();
-                    },
-                  })
-                }
+                onClick={runScrapeSequential}
                 icon={<Play className="h-5 w-5" />}
                 gradient="from-amber-300/50 to-orange-200/40"
                 primary
@@ -772,6 +880,82 @@ export function SettingsClient({
                 destructive
               />
             </div>
+
+            {/* Live per-site scraping progress */}
+            {scrapeProgress.phase !== "idle" && (
+              <div className="rounded-xl border border-amber-700/30 bg-amber-50/30 p-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  {scrapeProgress.phase === "filtering" ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-amber-700" />
+                      <span>Running relevance filter…</span>
+                    </>
+                  ) : scrapeProgress.phase === "done" ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <span>All sites scraped</span>
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-amber-700" />
+                      <span>
+                        Scraping:{" "}
+                        <strong className="text-amber-900">
+                          {scrapeProgress.currentLabel}
+                        </strong>
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  {scrapeProgress.completed.map((r) => (
+                    <div key={r.source} className="flex items-center gap-2 text-xs">
+                      {r.ok ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      ) : (
+                        <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                      )}
+                      <span className="w-40 font-medium shrink-0">{r.label}</span>
+                      {r.ok ? (
+                        <span className="text-muted-foreground">
+                          {r.count} postings
+                          {r.durationMs
+                            ? ` · ${(r.durationMs / 1000).toFixed(1)}s`
+                            : ""}
+                        </span>
+                      ) : (
+                        <span className="text-red-400 truncate">{r.error}</span>
+                      )}
+                    </div>
+                  ))}
+
+                  {scrapeProgress.phase === "scraping" &&
+                    scrapeProgress.currentSource && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-700 shrink-0" />
+                        <span className="w-40 font-medium shrink-0 text-amber-900">
+                          {scrapeProgress.currentLabel}
+                        </span>
+                        <span className="text-muted-foreground">scraping…</span>
+                      </div>
+                    )}
+
+                  {scrapeProgress.remaining.map((source) => (
+                    <div
+                      key={source}
+                      className="flex items-center gap-2 text-xs opacity-40"
+                    >
+                      <CircleDashed className="h-3.5 w-3.5 shrink-0" />
+                      <span className="w-40 font-medium shrink-0">
+                        {jobSourceLabel(source)}
+                      </span>
+                      <span className="text-muted-foreground">pending</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {lastRun && (
               <div

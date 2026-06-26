@@ -5,20 +5,15 @@ describe("scraper registry", () => {
   it("returns the full set of enabled scrapers in fallback order", () => {
     const scrapers = getEnabledScrapers();
     expect(scrapers.map((s) => s.source)).toEqual([
+      "indeed",
       "remotive",
-      "arbeitnow",
       "jobicy",
-      "reed",
       "remote_co",
-      "weworkremotely",
+      "wwr_dom",
       "remoteok",
       "wellfound",
-      "totaljobs",
-      "stepstone",
-      "welcome_to_the_jungle",
       "monster",
-      "indeed",
-      "ziprecruiter",
+      "hn",
     ]);
   });
 });

@@ -1,8 +1,4 @@
 {
-  "crons": [
-    { "path": "/api/cron/scrape", "schedule": "0 6 * * *" },
-    { "path": "/api/cron/outreach", "schedule": "0 14 * * *" }
-  ],
   "functions": {
     "api/py/scrape.py": {
       "maxDuration": 60

@@ -30,7 +30,7 @@ describe("dashboard source statuses", () => {
     });
   });
 
-  it("returns requested boards and groups We Work Remotely HTML with RSS", () => {
+  it("returns requested boards and folds legacy RSS into the DOM scraper row", () => {
     const statuses = buildLatestScrapeSourceStatuses([
       {
         stats: {
@@ -88,29 +88,37 @@ describe("dashboard source statuses", () => {
       },
     ]);
 
-    expect(statuses.map((source) => source.source)).toEqual([
-      ...REQUESTED_JOB_SOURCES,
-      "remotive",
-    ]);
-    expect(statuses.some((source) => source.source === "wwr_dom")).toBe(false);
-    expect(statuses.some((source) => source.source === "hn")).toBe(false);
-    expect(statuses.find((source) => source.source === "weworkremotely")).toMatchObject({
+    // REQUESTED_JOB_SOURCES are listed first, then any extras from the run
+    expect(statuses.slice(0, REQUESTED_JOB_SOURCES.length).map((s) => s.source)).toEqual(
+      REQUESTED_JOB_SOURCES
+    );
+    // Legacy RSS entries are folded into the wwr_dom row — no separate row
+    expect(statuses.some((s) => s.source === "weworkremotely")).toBe(false);
+    // wwr_dom (We Work Remotely DOM) is now a requested source and shows up
+    expect(statuses.find((s) => s.source === "wwr_dom")).toMatchObject({
       ok: true,
       status: "scraped",
       count: 3,
     });
-    expect(statuses.find((source) => source.source === "totaljobs")).toMatchObject({
+    // hn is now a requested visible source
+    expect(statuses.find((s) => s.source === "hn")).toMatchObject({
+      ok: true,
+      status: "scraped",
+      count: 99,
+    });
+    // Non-requested sources from the run are appended after the requested list
+    expect(statuses.find((s) => s.source === "totaljobs")).toMatchObject({
       ok: false,
       status: "rejected",
     });
-    expect(statuses.find((source) => source.source === "reed")).toMatchObject({
+    expect(statuses.find((s) => s.source === "reed")).toMatchObject({
       ok: false,
       status: "not_configured",
     });
-    expect(statuses.find((source) => source.source === "wellfound")).toMatchObject({
+    expect(statuses.find((s) => s.source === "wellfound")).toMatchObject({
       status: "not_attempted",
     });
-    expect(statuses.find((source) => source.source === "remotive")).toMatchObject({
+    expect(statuses.find((s) => s.source === "remotive")).toMatchObject({
       ok: true,
       status: "scraped",
       count: 4,
@@ -119,8 +127,9 @@ describe("dashboard source statuses", () => {
 });
 
 describe("visible job sources", () => {
-  it("hides legacy HN postings from visible app flows", () => {
-    expect(isVisibleJobSource("hn")).toBe(false);
+  it("shows all active sources including HN Hiring", () => {
+    expect(isVisibleJobSource("hn")).toBe(true);
     expect(isVisibleJobSource("remoteok")).toBe(true);
+    expect(isVisibleJobSource("indeed")).toBe(true);
   });
 });

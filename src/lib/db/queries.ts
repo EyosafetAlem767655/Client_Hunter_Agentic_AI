@@ -671,7 +671,8 @@ function groupDashboardSourceStatuses(
 }
 
 function dashboardSourceFor(source: RawPosting["source"]): RawPosting["source"] {
-  return source === "wwr_dom" ? "weworkremotely" : source;
+  // Fold legacy RSS scraper entries into the active DOM scraper row
+  return source === "weworkremotely" ? "wwr_dom" : source;
 }
 
 function mergeSourceStatuses(

@@ -6,7 +6,6 @@ import { ScraperRejectedError } from "./errors";
 
 const BLOCKED_DOMAINS = [
   "linkedin.com",
-  "indeed.com",
   "glassdoor.com",
   "ziprecruiter.com",
 ];
