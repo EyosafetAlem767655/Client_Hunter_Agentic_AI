@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  filterVaPostings,
-  isLikelyVaRole,
-  isUsOrEuropeFriendly,
-} from "@/lib/agent/va-filter";
+import { filterVaPostings } from "@/lib/agent/va-filter";
 import type { RawPosting } from "@/types";
 
 function p(overrides: Partial<RawPosting>): RawPosting {
@@ -21,34 +17,47 @@ function p(overrides: Partial<RawPosting>): RawPosting {
   };
 }
 
-describe("va-filter", () => {
-  it("matches virtual assistant titles", () => {
-    expect(isLikelyVaRole(p({ title: "Virtual Assistant" }))).toBe(true);
-    expect(isLikelyVaRole(p({ title: "Executive Assistant" }))).toBe(true);
-    expect(isLikelyVaRole(p({ title: "Customer Support Agent" }))).toBe(true);
-    expect(isLikelyVaRole(p({ title: "Member Experience Associate" }))).toBe(true);
-    expect(isLikelyVaRole(p({ title: "Recruiting Coordinator" }))).toBe(true);
-  });
-
-  it("rejects engineering / senior tech roles", () => {
-    expect(isLikelyVaRole(p({ title: "Senior Rust Engineer" }))).toBe(false);
-    expect(isLikelyVaRole(p({ title: "Staff ML Researcher" }))).toBe(false);
-  });
-
-  it("matches US and EU locations", () => {
-    expect(isUsOrEuropeFriendly(p({ location: "US Remote" }))).toBe(true);
-    expect(isUsOrEuropeFriendly(p({ location: "Germany" }))).toBe(true);
-    expect(isUsOrEuropeFriendly(p({ location: "Worldwide" }))).toBe(true);
-  });
-
-  it("filterVaPostings keeps only VA + US/EU postings", () => {
+describe("filterVaPostings (medical pre-filter)", () => {
+  it("keeps medical admin titles", () => {
     const postings = [
-      p({ title: "Virtual Assistant", location: "US Only" }),
-      p({ title: "Customer Support", location: "Berlin, Germany" }),
-      p({ title: "Senior Rust Engineer", location: "US Only" }),
-      p({ title: "Virtual Assistant", location: "Mars" }),
+      p({ title: "Medical Receptionist" }),
+      p({ title: "Patient Coordinator" }),
+      p({ title: "Medical Billing Specialist" }),
+      p({ title: "Prior Authorization Specialist" }),
+      p({ title: "Insurance Verification Specialist" }),
+      p({ title: "Dental Receptionist" }),
+      p({ title: "Revenue Cycle Specialist" }),
+    ];
+    expect(filterVaPostings(postings)).toHaveLength(7);
+  });
+
+  it("keeps postings with medical keywords in description", () => {
+    const postings = [
+      p({ title: "Remote Coordinator", description: "You will verify eligibility and handle prior authorization requests." }),
+      p({ title: "Office Admin", description: "Experience with medical records and EHR required." }),
+    ];
+    expect(filterVaPostings(postings)).toHaveLength(2);
+  });
+
+  it("drops unrelated roles", () => {
+    const postings = [
+      p({ title: "Senior Rust Engineer" }),
+      p({ title: "Staff ML Researcher" }),
+      p({ title: "DevOps Architect" }),
+      p({ title: "Product Manager" }),
+    ];
+    expect(filterVaPostings(postings)).toHaveLength(0);
+  });
+
+  it("mixed: keeps medical, drops tech", () => {
+    const postings = [
+      p({ title: "Medical Receptionist" }),
+      p({ title: "Senior Backend Engineer" }),
+      p({ title: "Referral Coordinator" }),
+      p({ title: "Data Scientist" }),
     ];
     const out = filterVaPostings(postings);
     expect(out).toHaveLength(2);
+    expect(out.map((j) => j.title)).toEqual(["Medical Receptionist", "Referral Coordinator"]);
   });
 });

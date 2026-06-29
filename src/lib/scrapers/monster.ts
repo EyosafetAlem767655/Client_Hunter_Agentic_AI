@@ -5,9 +5,13 @@ import { ScraperRejectedError } from "./errors";
 import { absoluteUrl, dedupePostings, textFrom } from "./html-card";
 
 const SEARCH_URLS = [
-  "https://www.monster.com/jobs/search?q=Customer+Support&where=Remote&page=1",
-  "https://www.monster.com/jobs/search?q=Virtual+Assistant&where=Remote&page=1",
-  "https://www.monster.com/jobs/search?q=Administrative+Assistant&where=Remote&page=1",
+  "https://www.monster.com/jobs/search?q=Medical+Receptionist&where=Remote&page=1",
+  "https://www.monster.com/jobs/search?q=Patient+Coordinator&where=Remote&page=1",
+  "https://www.monster.com/jobs/search?q=Medical+Billing+Specialist&where=Remote&page=1",
+  "https://www.monster.com/jobs/search?q=Prior+Authorization+Specialist&where=Remote&page=1",
+  "https://www.monster.com/jobs/search?q=Insurance+Verification+Specialist&where=Remote&page=1",
+  "https://www.monster.com/jobs/search?q=Medical+Administrative+Assistant&where=Remote&page=1",
+  "https://www.monster.com/jobs/search?q=Revenue+Cycle+Specialist&where=Remote&page=1",
 ];
 
 export class MonsterScraper extends BaseScraper {

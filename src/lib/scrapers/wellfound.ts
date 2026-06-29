@@ -11,17 +11,32 @@ export class WellfoundScraper extends BaseScraper {
   }
 
   async fetch(limit: number): Promise<RawPosting[]> {
-    const url = "https://wellfound.com/jobs";
-    const parsed = new URL(url);
-    if (!(await this.respectRobots(parsed.origin, parsed.pathname))) {
+    const searchUrls = [
+      "https://wellfound.com/jobs?q=medical+receptionist&remote=true",
+      "https://wellfound.com/jobs?q=patient+coordinator&remote=true",
+      "https://wellfound.com/jobs?q=medical+billing&remote=true",
+      "https://wellfound.com/jobs?q=prior+authorization&remote=true",
+      "https://wellfound.com/jobs?q=insurance+verification&remote=true",
+    ];
+
+    const robotsBase = new URL(searchUrls[0]);
+    if (!(await this.respectRobots(robotsBase.origin, "/jobs"))) {
       throw new ScraperRejectedError("Wellfound robots.txt disallows /jobs");
     }
-    const response = await this.fetchWithRetry(url);
-    const html = await response.text();
-    const postings = dedupePostings([
-      ...this.parseJsonLdPostings(html, url),
-      ...this.parseCards(html, url),
-    ]).slice(0, limit);
+
+    const all: RawPosting[] = [];
+    for (const url of searchUrls) {
+      if (all.length >= limit) break;
+      try {
+        const response = await this.fetchWithRetry(url);
+        const html = await response.text();
+        all.push(...this.parseJsonLdPostings(html, url), ...this.parseCards(html, url));
+      } catch {
+        // Try next URL
+      }
+    }
+
+    const postings = dedupePostings(all).slice(0, limit);
     if (postings.length === 0) {
       throw new ScraperRejectedError("Wellfound returned no parseable postings");
     }

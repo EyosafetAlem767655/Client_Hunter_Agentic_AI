@@ -32,17 +32,17 @@ export class JobicyScraper extends BaseScraper {
 
   async fetch(limit: number): Promise<RawPosting[]> {
     const tagQueries = [
-      "virtual-assistant",
-      "customer-service",
-      "customer-support",
-      "administrative",
-      "operations",
-      "data-entry",
-      "hr",
-      "finance",
-      "social-media",
-      "sales",
-      "marketing",
+      "healthcare",
+      "medical",
+      "medical-billing",
+      "medical-records",
+      "patient-services",
+      "patient-coordinator",
+      "medical-receptionist",
+      "prior-authorization",
+      "insurance-verification",
+      "revenue-cycle",
+      "dental",
     ];
 
     const seen = new Set<string>();

@@ -16,12 +16,9 @@ import type { JobSource } from "@/types";
  * scraping one site at a time and showing live progress.
  */
 export const ENABLED_SOURCES: JobSource[] = [
-  "indeed",
   "remotive",
   "jobicy",
-  "remote_co",
   "wwr_dom",
-  "remoteok",
   "wellfound",
   "monster",
   "hn",
@@ -30,12 +27,9 @@ export const ENABLED_SOURCES: JobSource[] = [
 export function getEnabledScrapers(): BaseScraper[] {
   const contact = env.CONTACT_EMAIL;
   return [
-    new IndeedScraper(contact),
     new RemotiveScraper(contact),
     new JobicyScraper(contact),
-    new RemoteCoScraper(contact),
     new WwrDomScraper(contact),
-    new RemoteOkScraper(contact),
     new WellfoundScraper(contact),
     new MonsterScraper(contact),
     new HnHiringScraper(contact),

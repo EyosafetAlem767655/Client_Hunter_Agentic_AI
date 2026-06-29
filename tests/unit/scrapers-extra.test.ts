@@ -41,14 +41,14 @@ describe("RemotiveScraper", () => {
     });
 
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes("category=customer-support")) {
-        return jsonResponse({ jobs: [job(1, "Customer Support Rep"), job(2, "Customer Success Lead")] });
+      if (url.includes("medical+receptionist")) {
+        return jsonResponse({ jobs: [job(1, "Medical Receptionist"), job(2, "Front Desk Receptionist")] });
       }
-      if (url.includes("virtual+assistant")) {
-        return jsonResponse({ jobs: [job(2, "Customer Success Lead"), job(3, "Virtual Assistant")] });
+      if (url.includes("patient+coordinator")) {
+        return jsonResponse({ jobs: [job(2, "Front Desk Receptionist"), job(3, "Patient Coordinator")] });
       }
-      if (url.includes("executive+assistant")) {
-        return jsonResponse({ jobs: [job(4, "Executive Assistant")] });
+      if (url.includes("medical+biller")) {
+        return jsonResponse({ jobs: [job(4, "Medical Biller")] });
       }
       return jsonResponse({ jobs: [] });
     });
@@ -197,11 +197,11 @@ describe("JobicyScraper", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes("virtual-assistant")) {
-          return jsonResponse({ jobs: [job("a", "Virtual Assistant")] });
+        if (url.includes("healthcare")) {
+          return jsonResponse({ jobs: [job("a", "Medical Receptionist")] });
         }
-        if (url.includes("customer-service")) {
-          return jsonResponse({ jobs: [job("a", "Virtual Assistant"), job("b", "CS Rep")] });
+        if (url.includes("medical")) {
+          return jsonResponse({ jobs: [job("a", "Medical Receptionist"), job("b", "Medical Biller")] });
         }
         return jsonResponse({ jobs: [] });
       })

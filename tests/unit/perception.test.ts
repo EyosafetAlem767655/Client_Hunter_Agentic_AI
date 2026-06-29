@@ -7,10 +7,10 @@ vi.mock("@/lib/scraper/node-runner", () => ({
         source: "remoteok",
         externalId: "1",
         url: "https://example.com/1",
-        title: "Virtual Assistant",
-        company: "Acme",
+        title: "Medical Receptionist",
+        company: "ClearPath Health",
         location: "US Remote",
-        description: "We need a virtual assistant for calendar management. US-based.",
+        description: "We need a remote medical receptionist to schedule appointments and verify insurance eligibility.",
         postedAt: null,
         raw: {},
       },
@@ -62,7 +62,7 @@ describe("perception", () => {
   it("uses Node scrapers, filters down to VA roles, and persists only VA postings", async () => {
     const { runPerception } = await import("@/lib/agent/perception");
     const result = await runPerception(10);
-    // Only the VA posting should pass the VA filter
+    // Only the medical admin posting should pass the medical pre-filter
     expect(result.scraped).toBe(1);
     expect(result.inserted).toBe(1);
     expect(result.engine).toBe("node");

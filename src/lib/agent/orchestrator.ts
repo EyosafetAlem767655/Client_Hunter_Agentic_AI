@@ -10,7 +10,7 @@ import {
 } from "./action";
 import { memory } from "./memory";
 import { runPerception } from "./perception";
-import { filterPendingPostings } from "./reasoning";
+import { filterPendingPostings } from "./medical-filter";
 import { setRunId, logEvent } from "./observability";
 import { sendDailyDigest, sendInstantVaAlert } from "@/lib/email/digest";
 import type { RawPosting } from "@/types";

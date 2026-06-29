@@ -1,31 +1,17 @@
 import type { RawPosting } from "@/types";
-import {
-  isLikelyTargetRole,
-  isUsOrEuropeFriendlyText,
-} from "@/lib/job-relevance";
 
-/**
- * Keyword pre-filter for virtual-assistant / remote support style roles
- * in US or European companies. We keep it lenient so the downstream LLM
- * can do the final relevance call, but cheap enough to drop obviously
- * unrelated postings (senior engineer, infra, etc) before paying for LLM.
- */
-export function isLikelyVaRole(posting: {
-  title: string;
-  description: string;
-}): boolean {
-  return isLikelyTargetRole(posting);
-}
-
-export function isUsOrEuropeFriendly(posting: {
-  location: string;
-  description: string;
-}): boolean {
-  return isUsOrEuropeFriendlyText(posting);
-}
+const MEDICAL_PRE_FILTER_KEYWORDS = [
+  "medical", "patient", "receptionist", "front desk", "front office",
+  "appointment scheduler", "scheduling coordinator", "insurance verification",
+  "prior authorization", "medical billing", "medical biller",
+  "revenue cycle", "claims", "referral coordinator", "dental",
+  "eligibility", "intake coordinator", "health information",
+  "medical records", "medical administrative",
+];
 
 export function filterVaPostings(postings: RawPosting[]): RawPosting[] {
-  return postings.filter(
-    (p) => isLikelyVaRole(p) && isUsOrEuropeFriendly(p)
-  );
+  return postings.filter((p) => {
+    const lower = (p.title + " " + p.description).toLowerCase();
+    return MEDICAL_PRE_FILTER_KEYWORDS.some((kw) => lower.includes(kw));
+  });
 }

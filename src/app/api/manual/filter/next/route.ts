@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyManualAuth } from "@/lib/auth";
-import { filterPendingPostings } from "@/lib/agent/reasoning";
+import { filterPendingPostings } from "@/lib/agent/medical-filter";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";

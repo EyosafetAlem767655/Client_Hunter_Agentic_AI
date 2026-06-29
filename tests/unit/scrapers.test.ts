@@ -125,8 +125,9 @@ describe("scrapers", () => {
 
     const scraper = new HnHiringScraper("bot@example.com");
     const postings = await scraper.fetch(5);
+    // Only medical-admin postings pass the keyword filter; the "Senior Backend" entry is dropped
     expect(postings[0].source).toBe("hn");
-    expect(postings[0].description).toContain("hiring@acme.com");
+    expect(postings[0].description).toContain("hiring@clearpath.com");
   });
 
   it("blocks LinkedIn URLs", () => {

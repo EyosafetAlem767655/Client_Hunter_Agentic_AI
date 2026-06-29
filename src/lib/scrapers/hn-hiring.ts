@@ -1,6 +1,17 @@
 import type { RawPosting } from "@/types";
-import { prioritizeTargetPostings } from "@/lib/job-relevance";
 import { BaseScraper } from "./base";
+
+const MEDICAL_TITLE_KEYWORDS = [
+  "medical receptionist", "front desk", "patient service", "patient access",
+  "appointment scheduler", "scheduling coordinator", "patient coordinator",
+  "patient care coordinator", "patient intake", "intake coordinator",
+  "medical administrative", "medical office assistant", "medical secretary",
+  "medical records", "health information", "data entry clerk",
+  "insurance verification", "eligibility", "prior authorization",
+  "medical biller", "medical billing", "accounts receivable",
+  "claims processor", "revenue cycle", "collections specialist",
+  "referral coordinator", "dental receptionist", "patient recall",
+];
 
 interface HnSearchHit {
   objectID: string;
@@ -66,6 +77,10 @@ export class HnHiringScraper extends BaseScraper {
     };
 
     walk(thread.children);
-    return prioritizeTargetPostings(postings, limit);
+    const matched = postings.filter((p) => {
+      const lower = (p.title + " " + p.description).toLowerCase();
+      return MEDICAL_TITLE_KEYWORDS.some((kw) => lower.includes(kw));
+    });
+    return matched.slice(0, limit);
   }
 }

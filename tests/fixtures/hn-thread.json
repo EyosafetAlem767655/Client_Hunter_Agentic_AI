@@ -6,6 +6,13 @@
       "text": "Acme | Senior Backend | Remote | hiring@acme.com",
       "created_at_i": 1717200000,
       "children": []
+    },
+    {
+      "id": 40002,
+      "author": "clinic_ops",
+      "text": "ClearPath Health | Medical Receptionist (Remote) | US | Full-time | We are a growing telehealth practice looking for a remote medical receptionist to schedule appointments, verify insurance eligibility, and handle prior authorization requests. EHR experience with Athena preferred. | hiring@clearpath.com",
+      "created_at_i": 1717200100,
+      "children": []
     }
   ]
 }
