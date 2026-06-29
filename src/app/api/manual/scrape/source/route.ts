@@ -4,6 +4,7 @@ import { scraperForSource, ENABLED_SOURCES } from "@/lib/scrapers";
 import { jobSourceLabel } from "@/lib/job-sources";
 import { ingestPostings } from "@/lib/agent/perception";
 import { filterVaPostings } from "@/lib/agent/va-filter";
+import { parseIngestPostings } from "@/lib/scraper/python-client";
 import type { JobSource, RawPosting } from "@/types";
 
 export const maxDuration = 60;
@@ -32,7 +33,8 @@ async function tryPythonScraper(
     };
     if (!data.ok || !Array.isArray(data.jobs) || data.jobs.length === 0)
       return null;
-    return data.jobs as RawPosting[];
+    // Normalize postedAt strings → Date objects (matches RawPosting type)
+    return parseIngestPostings(data.jobs) as RawPosting[];
   } catch {
     return null;
   }

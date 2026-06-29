@@ -898,74 +898,14 @@ export function SettingsClient({
             <CardTitle>Manual triggers</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            <p className="text-sm text-muted-foreground">
-              Use the buttons below to run the pipeline on demand. Scraping runs
-              site-by-site in sequence so you can watch live progress for each
-              platform.
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <ActionTile
-                title="Run scrape + filter"
-                description="Scrapes each job board one by one (watch live progress below), then runs the OpenAI relevance filter. A 60-second countdown starts afterwards and the contact loop kicks off automatically."
-                disabled={loading !== null || scrapeCountdown !== null}
-                loading={loading === "Scrape" || loading === "Filter"}
-                onClick={runScrapeSequential}
-                icon={<Play className="h-5 w-5" />}
-                gradient="from-amber-300/50 to-orange-200/40"
-                primary
-              />
-              <ActionTile
-                title="Run outreach now"
-                description="Draft and send pending outreach emails through the guardrails layer. Respects DRY_RUN."
-                disabled={loading !== null}
-                loading={loading === "Outreach"}
-                onClick={() => runManual("/api/manual/outreach", "Outreach")}
-                icon={<Mail className="h-5 w-5" />}
-                gradient="from-yellow-200/60 to-amber-100/50"
-              />
-              <ActionTile
-                title="Send test email"
-                description="Send a one-off test email to CONTACT_EMAIL via Gmail. Bypasses DRY_RUN — use this to verify your Gmail app password is correct."
-                disabled={loading !== null}
-                loading={loading === "Test email"}
-                onClick={() => runManual("/api/manual/test-email", "Test email")}
-                icon={<Send className="h-5 w-5" />}
-                gradient="from-orange-300/50 to-amber-200/40"
-              />
-              <ActionTile
-                title="Send digest now"
-                description="Fire the daily VA digest email immediately. Decoupled from the scrape so it doesn't cost Vercel function time during the run. Respects DRY_RUN."
-                disabled={loading !== null}
-                loading={loading === "Digest"}
-                onClick={() => runManual("/api/manual/digest", "Digest")}
-                icon={<FileText className="h-5 w-5" />}
-                gradient="from-amber-500/30 to-orange-500/20"
-              />
-              <ActionTile
-                title="Reset all data"
-                description="Wipe every scraped job, filter result, contact, draft, and run log. Keeps settings, cron schedule, and the suppression list. This cannot be undone."
-                disabled={loading !== null}
-                loading={loading === "Reset"}
-                onClick={() =>
-                  runManual("/api/manual/reset?confirm=yes", "Reset", {
-                    confirm:
-                      "This will delete every scraped job, filter result, contact, draft, and run log. Settings and cron schedule are preserved. Continue?",
-                  })
-                }
-                icon={<Trash2 className="h-5 w-5" />}
-                gradient="from-red-500/30 to-rose-500/20"
-                destructive
-              />
-            </div>
-
-            {/* Per-site Playwright scrape buttons */}
+            {/* Per-site Playwright scrape buttons — primary scraping interface */}
             <div className="rounded-xl border border-primary/20 bg-background/30 p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Search className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">Scrape one site</span>
+                <span className="text-sm font-medium">Scrape by site</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Click a site to run a headless-browser scrape for that source only — auto-filters afterwards.
+                Click a site to open a headless browser, scroll to the bottom, and scrape jobs — filter runs automatically after.
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {ENABLED_SOURCES.map((source) => {
@@ -1001,6 +941,55 @@ export function SettingsClient({
                   );
                 })}
               </div>
+            </div>
+
+            {/* Pipeline controls */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ActionTile
+                title="Run outreach now"
+                description="Draft and send pending outreach emails through the guardrails layer. Respects DRY_RUN."
+                disabled={loading !== null}
+                loading={loading === "Outreach"}
+                onClick={() => runManual("/api/manual/outreach", "Outreach")}
+                icon={<Mail className="h-5 w-5" />}
+                gradient="from-yellow-200/60 to-amber-100/50"
+              />
+              <ActionTile
+                title="Send test email"
+                description="Send a one-off test email to CONTACT_EMAIL via Gmail. Bypasses DRY_RUN — use this to verify your Gmail app password is correct."
+                disabled={loading !== null}
+                loading={loading === "Test email"}
+                onClick={() => runManual("/api/manual/test-email", "Test email")}
+                icon={<Send className="h-5 w-5" />}
+                gradient="from-orange-300/50 to-amber-200/40"
+              />
+              <ActionTile
+                title="Send digest now"
+                description="Fire the daily medical digest email immediately. Decoupled from the scrape so it doesn't cost Vercel function time during the run. Respects DRY_RUN."
+                disabled={loading !== null}
+                loading={loading === "Digest"}
+                onClick={() => runManual("/api/manual/digest", "Digest")}
+                icon={<FileText className="h-5 w-5" />}
+                gradient="from-amber-500/30 to-orange-500/20"
+              />
+              <ActionTile
+                title="Reset all data"
+                description="Wipe every scraped job, filter result, contact, draft, and run log. Keeps settings, cron schedule, and the suppression list. This cannot be undone."
+                disabled={loading !== null}
+                loading={loading === "Reset"}
+                onClick={() =>
+                  runManual("/api/manual/reset?confirm=yes", "Reset", {
+                    confirm:
+                      "This will delete every scraped job, filter result, contact, draft, and run log. Settings and cron schedule are preserved. Continue?",
+                    after: () => {
+                      window.location.reload();
+                    },
+                  })
+                }
+                icon={<Trash2 className="h-5 w-5" />}
+                gradient="from-red-500/30 to-rose-500/20"
+                destructive
+              />
             </div>
 
             {/* Live per-site scraping progress */}
