@@ -115,7 +115,7 @@ describe("dashboard source statuses", () => {
       ok: false,
       status: "not_configured",
     });
-    expect(statuses.find((s) => s.source === "wellfound")).toMatchObject({
+    expect(statuses.find((s) => s.source === "linkedin")).toMatchObject({
       status: "not_attempted",
     });
     expect(statuses.find((s) => s.source === "remotive")).toMatchObject({

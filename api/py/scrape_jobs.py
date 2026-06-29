@@ -1,11 +1,10 @@
 """POST /api/py/scrape_jobs
 
-Per-source job scraper using Playwright (headless Chromium) for JS-heavy sites
-(Monster, Wellfound) and requests + BeautifulSoup for API-based sites (Remotive,
-Jobicy, HN Hiring, We Work Remotely).
+Per-source job scraper using requests + BeautifulSoup for all active sources
+(Remotive, Jobicy, We Work Remotely, LinkedIn, HN Hiring).
 
-POST body: { "source": "monster" }
-Response:  { "ok": true, "jobs": [...], "engine": "playwright|requests", "count": N }
+POST body: { "source": "linkedin" }
+Response:  { "ok": true, "jobs": [...], "engine": "requests", "count": N }
 
 Each source gets the full 60-second Vercel function budget because individual
 site buttons trigger this endpoint one source at a time.
@@ -48,7 +47,7 @@ MEDICAL_KEYWORDS = [
     "patient recall",
 ]
 
-VALID_SOURCES = {"remotive", "jobicy", "wwr_dom", "monster", "wellfound", "hn"}
+VALID_SOURCES = {"remotive", "jobicy", "wwr_dom", "linkedin", "hn"}
 
 # ── Auth & import helpers ──────────────────────────────────────────────────────
 
@@ -313,6 +312,66 @@ def scrape_hn(limit: int = 100) -> tuple[list[dict[str, Any]], str]:
         return [], "requests"
 
 
+# ── LinkedIn (public guest API — no auth required) ────────────────────────────
+
+def scrape_linkedin(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
+    queries = [
+        "medical+receptionist", "patient+coordinator", "medical+biller",
+        "prior+authorization+specialist", "insurance+verification+specialist",
+        "medical+administrative+assistant", "appointment+scheduler",
+        "revenue+cycle+specialist", "referral+coordinator", "dental+receptionist",
+    ]
+    seen: set[str] = set()
+    jobs: list[dict[str, Any]] = []
+
+    for q in queries:
+        if len(jobs) >= limit:
+            break
+        try:
+            # f_WT=2 = remote work type, f_TPR=r604800 = past week
+            url = (
+                "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+                f"?keywords={q}&location=United+States&f_WT=2&f_TPR=r604800&start=0"
+            )
+            r = _get(url, timeout=12)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "html.parser")
+
+            for li in soup.select("li"):
+                if len(jobs) >= limit:
+                    break
+                link = li.select_one("a.base-card__full-link")
+                if not link:
+                    continue
+                href = (link.get("href") or "").split("?")[0].strip()
+                if not href or "linkedin.com/jobs/view/" not in href:
+                    continue
+                if href in seen:
+                    continue
+                seen.add(href)
+
+                title_el = li.select_one("h3.base-search-card__title")
+                company_el = li.select_one("h4.base-search-card__subtitle")
+                loc_el = li.select_one(".job-search-card__location")
+
+                title = title_el.get_text(strip=True) if title_el else ""
+                company = company_el.get_text(strip=True) if company_el else ""
+                location = loc_el.get_text(strip=True) if loc_el else "Remote"
+
+                if not title:
+                    continue
+                jobs.append(_job(
+                    source="linkedin",
+                    url=href,
+                    title=title,
+                    company=company,
+                    location=location,
+                ))
+        except Exception:
+            pass
+    return jobs, "requests"
+
+
 # ── Monster (Playwright preferred, requests fallback) ─────────────────────────
 
 def _extract_monster_page(page, seen: set[str]) -> list[dict[str, Any]]:
@@ -359,9 +418,19 @@ def scrape_monster_playwright(sync_playwright, limit: int = 100) -> list[dict[st
     jobs: list[dict[str, Any]] = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        )
         try:
-            ctx = browser.new_context(user_agent=BROWSER_UA)
+            ctx = browser.new_context(
+                user_agent=BROWSER_UA,
+                extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
+            )
+            # Spoof navigator.webdriver so Monster's bot detection doesn't see automation
+            ctx.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
             for q in queries:
                 if len(jobs) >= limit:
                     break
@@ -459,9 +528,18 @@ def scrape_wellfound_playwright(sync_playwright, limit: int = 100) -> list[dict[
     jobs: list[dict[str, Any]] = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        )
         try:
-            ctx = browser.new_context(user_agent=BROWSER_UA)
+            ctx = browser.new_context(
+                user_agent=BROWSER_UA,
+                extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
+            )
+            ctx.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
             for q in queries:
                 if len(jobs) >= limit:
                     break
@@ -539,8 +617,6 @@ def scrape_wellfound_requests(limit: int = 100) -> list[dict[str, Any]]:
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 def scrape_source(source: str) -> tuple[list[dict[str, Any]], str]:
-    sync_playwright = _try_playwright_import()
-
     if source == "remotive":
         return scrape_remotive()
     if source == "jobicy":
@@ -549,14 +625,8 @@ def scrape_source(source: str) -> tuple[list[dict[str, Any]], str]:
         return scrape_wwr()
     if source == "hn":
         return scrape_hn()
-    if source == "monster":
-        if sync_playwright:
-            return scrape_monster_playwright(sync_playwright), "playwright"
-        return scrape_monster_requests(), "requests"
-    if source == "wellfound":
-        if sync_playwright:
-            return scrape_wellfound_playwright(sync_playwright), "playwright"
-        return scrape_wellfound_requests(), "requests"
+    if source == "linkedin":
+        return scrape_linkedin()
     return [], "none"
 
 
@@ -593,3 +663,19 @@ class handler(BaseHTTPRequestHandler):
         self.send_header("Content-type", "application/json")
         self.end_headers()
         self.wfile.write(encoded)
+
+
+# ── CLI subprocess entry-point (used by TypeScript route in local dev) ─────────
+
+if __name__ == "__main__":
+    import sys
+    src = sys.argv[1] if len(sys.argv) > 1 else ""
+    if src not in VALID_SOURCES:
+        print(json.dumps({"ok": False, "error": f"Unknown source: {src!r}"}))
+        sys.exit(1)
+    try:
+        found, eng = scrape_source(src)
+        print(json.dumps({"ok": True, "jobs": found, "engine": eng, "count": len(found)}))
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)[:300]}))
+        sys.exit(1)

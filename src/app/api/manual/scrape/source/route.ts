@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import path from "node:path";
 import { NextResponse } from "next/server";
 import { verifyManualAuth } from "@/lib/auth";
 import { scraperForSource, ENABLED_SOURCES } from "@/lib/scrapers";
@@ -11,7 +13,42 @@ export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-async function tryPythonScraper(
+// ── Local dev: spawn Python as a subprocess (Python endpoints only run on Vercel)
+
+function tryPythonSubprocess(source: string): Promise<RawPosting[] | null> {
+  const scriptPath = path.join(process.cwd(), "api", "py", "scrape_jobs.py");
+  return new Promise<RawPosting[] | null>((resolve) => {
+    let stdout = "";
+    let done = false;
+    const finish = (result: RawPosting[] | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => { proc.kill(); finish(null); }, 55_000);
+    const proc = spawn("python", [scriptPath, source], {
+      cwd: process.cwd(),
+      env: { ...process.env },
+    });
+    proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    proc.on("close", (code) => {
+      if (code !== 0) { finish(null); return; }
+      try {
+        const data = JSON.parse(stdout) as { ok?: boolean; jobs?: unknown[] };
+        if (!data.ok || !Array.isArray(data.jobs) || data.jobs.length === 0) {
+          finish(null); return;
+        }
+        finish(parseIngestPostings(data.jobs) as RawPosting[]);
+      } catch { finish(null); }
+    });
+    proc.on("error", () => finish(null));
+  });
+}
+
+// ── Vercel: call the Python serverless function via HTTP ──────────────────────
+
+async function tryPythonVercel(
   source: JobSource,
   origin: string
 ): Promise<RawPosting[] | null> {
@@ -27,17 +64,24 @@ async function tryPythonScraper(
       signal: AbortSignal.timeout(52_000),
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as {
-      ok?: boolean;
-      jobs?: unknown[];
-    };
+    const data = (await res.json()) as { ok?: boolean; jobs?: unknown[] };
     if (!data.ok || !Array.isArray(data.jobs) || data.jobs.length === 0)
       return null;
-    // Normalize postedAt strings → Date objects (matches RawPosting type)
     return parseIngestPostings(data.jobs) as RawPosting[];
   } catch {
     return null;
   }
+}
+
+async function tryPythonScraper(
+  source: JobSource,
+  origin: string
+): Promise<RawPosting[] | null> {
+  if (process.env.VERCEL !== "1") {
+    // Local dev: spawn Python directly — the /api/py endpoint is Vercel-only
+    return tryPythonSubprocess(source);
+  }
+  return tryPythonVercel(source, origin);
 }
 
 export async function POST(request: Request) {

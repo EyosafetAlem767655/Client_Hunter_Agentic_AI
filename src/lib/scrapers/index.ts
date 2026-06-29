@@ -1,6 +1,7 @@
 import { env } from "@/lib/env";
 import { IndeedScraper } from "./indeed";
 import { JobicyScraper } from "./jobicy";
+import { LinkedInScraper } from "./linkedin";
 import { MonsterScraper } from "./monster";
 import { RemoteCoScraper } from "./remote-co";
 import { RemoteOkScraper } from "./remoteok";
@@ -19,8 +20,7 @@ export const ENABLED_SOURCES: JobSource[] = [
   "remotive",
   "jobicy",
   "wwr_dom",
-  "wellfound",
-  "monster",
+  "linkedin",
   "hn",
 ];
 
@@ -30,8 +30,7 @@ export function getEnabledScrapers(): BaseScraper[] {
     new RemotiveScraper(contact),
     new JobicyScraper(contact),
     new WwrDomScraper(contact),
-    new WellfoundScraper(contact),
-    new MonsterScraper(contact),
+    new LinkedInScraper(contact),
     new HnHiringScraper(contact),
   ];
 }
@@ -47,6 +46,7 @@ export function scraperForSource(source: JobSource): BaseScraper | null {
     case "remoteok": return new RemoteOkScraper(contact);
     case "wellfound": return new WellfoundScraper(contact);
     case "monster": return new MonsterScraper(contact);
+    case "linkedin": return new LinkedInScraper(contact);
     case "hn": return new HnHiringScraper(contact);
     default: return null;
   }
@@ -56,6 +56,7 @@ export { BaseScraper, assertAllowedUrl } from "./base";
 export { IndeedScraper } from "./indeed";
 export { HnHiringScraper } from "./hn-hiring";
 export { JobicyScraper } from "./jobicy";
+export { LinkedInScraper } from "./linkedin";
 export { MonsterScraper } from "./monster";
 export { RemoteCoScraper } from "./remote-co";
 export { RemoteOkScraper } from "./remoteok";

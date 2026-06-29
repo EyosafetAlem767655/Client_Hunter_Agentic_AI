@@ -14,7 +14,8 @@ export type JobSource =
   | "welcome_to_the_jungle"
   | "monster"
   | "indeed"
-  | "ziprecruiter";
+  | "ziprecruiter"
+  | "linkedin";
 
 export type ScrapeSourceStatusValue =
   | "scraped"

@@ -4,10 +4,11 @@ export const JOB_SOURCE_META = {
   remotive: { label: "Remotive", requested: true },
   jobicy: { label: "Jobicy", requested: true },
   wwr_dom: { label: "We Work Remotely", requested: true },
-  wellfound: { label: "Wellfound", requested: true },
-  monster: { label: "Monster", requested: true },
+  linkedin: { label: "LinkedIn", requested: true },
   hn: { label: "HN Hiring", requested: true },
   // Sources below are disabled — kept in the type for historical DB rows
+  wellfound: { label: "Wellfound", requested: false },
+  monster: { label: "Monster", requested: false },
   indeed: { label: "Indeed", requested: false },
   remote_co: { label: "Remote.co", requested: false },
   remoteok: { label: "RemoteOK", requested: false },
@@ -29,8 +30,7 @@ export const ENABLED_SOURCES: JobSource[] = [
   "remotive",
   "jobicy",
   "wwr_dom",
-  "wellfound",
-  "monster",
+  "linkedin",
   "hn",
 ];
 
