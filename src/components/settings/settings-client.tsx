@@ -101,6 +101,21 @@ export function SettingsClient({
   const [scrapeCountdown, setScrapeCountdown] = useState<number | null>(null);
   const cancelCountdownRef = useState<{ current: boolean }>({ current: false })[0];
 
+  // Per-site individual scrape state (keyed by JobSource)
+  const [siteScrapeState, setSiteScrapeState] = useState<
+    Record<
+      string,
+      {
+        loading: boolean;
+        ok?: boolean;
+        count?: number;
+        inserted?: number;
+        durationMs?: number;
+        error?: string;
+      }
+    >
+  >({});
+
   useEffect(() => {
     const saved = sessionStorage.getItem(TOKEN_KEY);
     if (saved) setToken(saved);
@@ -368,6 +383,68 @@ export function SettingsClient({
       at: Date.now(),
     });
     void scheduleEmailLoopAfterScrape();
+  }
+
+  async function scrapeOneSite(source: string) {
+    if (!token.trim()) {
+      showToast("err", "Unauthorized — enter ADMIN_TOKEN first.");
+      return;
+    }
+    const label = jobSourceLabel(source);
+    setSiteScrapeState((prev) => ({ ...prev, [source]: { loading: true } }));
+    try {
+      const res = await fetch("/api/manual/scrape/source", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token.trim()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ source }),
+      });
+      const data: {
+        ok?: boolean;
+        count?: number;
+        inserted?: number;
+        durationMs?: number;
+        error?: string;
+      } = await res.json().catch(() => ({}));
+      const ok = data.ok ?? false;
+      setSiteScrapeState((prev) => ({
+        ...prev,
+        [source]: {
+          loading: false,
+          ok,
+          count: data.count ?? 0,
+          inserted: data.inserted ?? 0,
+          durationMs: data.durationMs,
+          error: data.error,
+        },
+      }));
+      if (ok) {
+        showToast(
+          "ok",
+          `${label}: ${data.count ?? 0} found, ${data.inserted ?? 0} new — filtering…`
+        );
+        setLoading("Filter");
+        try {
+          const filter = await runFilterLoop();
+          showToast("ok", `${label} done — ${filter.relevant} relevant jobs`);
+        } catch {
+          /* toast already shown inside runFilterLoop */
+        } finally {
+          setLoading(null);
+        }
+      } else {
+        showToast("err", `${label} failed: ${data.error ?? "Unknown error"}`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Request failed";
+      setSiteScrapeState((prev) => ({
+        ...prev,
+        [source]: { loading: false, ok: false, error: msg },
+      }));
+      showToast("err", `${label} failed: ${msg}`);
+    }
   }
 
   async function runManual(
@@ -879,6 +956,51 @@ export function SettingsClient({
                 gradient="from-red-500/30 to-rose-500/20"
                 destructive
               />
+            </div>
+
+            {/* Per-site Playwright scrape buttons */}
+            <div className="rounded-xl border border-primary/20 bg-background/30 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Search className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium">Scrape one site</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Click a site to run a headless-browser scrape for that source only — auto-filters afterwards.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {ENABLED_SOURCES.map((source) => {
+                  const state = siteScrapeState[source];
+                  const busy = state?.loading ?? false;
+                  return (
+                    <button
+                      key={source}
+                      disabled={!token.trim() || busy || loading !== null}
+                      onClick={() => void scrapeOneSite(source)}
+                      className="flex flex-col items-start gap-1 rounded-lg border border-primary/20 bg-background/50 p-2.5 text-left hover:bg-primary/5 disabled:opacity-40 transition-colors"
+                    >
+                      <div className="flex items-center gap-1.5 text-sm font-medium">
+                        {busy ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                        ) : state?.ok === true ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                        ) : state?.ok === false ? (
+                          <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                        ) : (
+                          <Play className="h-3.5 w-3.5 text-primary shrink-0" />
+                        )}
+                        <span className="truncate">{jobSourceLabel(source)}</span>
+                      </div>
+                      {state && !busy && (
+                        <span className="text-xs text-muted-foreground truncate w-full">
+                          {state.ok
+                            ? `${state.count ?? 0} found · ${state.inserted ?? 0} new${state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}`
+                            : (state.error ?? "Failed").slice(0, 42)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Live per-site scraping progress */}
