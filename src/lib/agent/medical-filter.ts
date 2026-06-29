@@ -11,8 +11,11 @@ const RED_FLAG_ONSITE = [
   "must report to our office", "local candidates only",
 ];
 
+// "no remote" is a hard disqualifier checked before remote-signal detection
+const RED_FLAG_NO_REMOTE = ["no remote"];
+
 const RED_FLAG_LOCATION_RESTRICTION = [
-  "must live in", "no remote", "us-based only", "us residents only",
+  "must live in", "us-based only", "us residents only",
 ];
 
 const RED_FLAG_TRANSPORT = [
@@ -157,7 +160,11 @@ function applyRuleFilter(posting: {
   const legalHit = hasAny(allText, RED_FLAG_LEGAL);
   if (legalHit) return disqualify(`Red flag (legal/work-auth): "${legalHit}"`);
 
-  // Location restriction only fails if no remote signal is present
+  // "no remote" is a hard disqualifier even if the word "remote" appears elsewhere
+  const noRemoteHit = hasAny(allText, RED_FLAG_NO_REMOTE);
+  if (noRemoteHit) return disqualify(`Red flag (location restriction, no remote): "${noRemoteHit}"`);
+
+  // Remaining location restrictions only disqualify when no remote signal is present
   const hasRemote = GREEN_FLAG_REMOTE.some((s) => allText.includes(s));
   if (!hasRemote) {
     const locHit = hasAny(allText, RED_FLAG_LOCATION_RESTRICTION);
