@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyManualAuth } from "@/lib/auth";
-import { filterPendingPostings } from "@/lib/agent/medical-filter";
+import { filterPendingPostings } from "@/lib/agent/reasoning";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -18,16 +18,12 @@ export async function POST(request: Request) {
   }
 
   const url = new URL(request.url);
-  // Default page-size dropped 12 → 8 to match FILTER_BATCH_SIZE so each
-  // OpenAI call is small enough to come back well under the timeout.
+  // 8 jobs per batch keeps each OpenAI call small and well under the 60 s limit.
+  // The UI loops this endpoint until done:true so all scraped jobs get processed.
   const n = Math.max(1, Math.min(24, Number(url.searchParams.get("n") ?? 8)));
   const started = Date.now();
 
   try {
-    // 35 s OpenAI timeout × 2 retries (with 500 ms / 1 s exponential backoff)
-    // ≈ 50 s worst case, which fits inside the 60 s function budget. OpenAI
-    // can take 20–25 s for structured outputs on gpt-4o-mini under load,
-    // and the previous 20 s × 1 retry was hitting that ceiling.
     const step = await filterPendingPostings(n, {
       maxBatches: 1,
       concurrency: 1,
@@ -47,7 +43,7 @@ export async function POST(request: Request) {
         ok: false,
         error: error instanceof Error ? error.message : String(error),
         hint:
-          "The scrape already stores jobs. This endpoint only runs the OpenAI relevance filter in a small batch.",
+          "Ensure OPENAI_API_KEY is set in Vercel Environment Variables. The filter sends jobs to GPT-4o-mini in small batches.",
       },
       { status: 200 }
     );

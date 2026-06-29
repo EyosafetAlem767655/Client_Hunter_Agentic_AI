@@ -11,6 +11,7 @@ import {
   parseFilteredBatch,
 } from "@/lib/llm/schemas";
 import { sha256Hex } from "@/lib/hash";
+import { sleep } from "@/lib/utils";
 import { memory } from "./memory";
 import { logEvent } from "./observability";
 
@@ -57,6 +58,8 @@ interface FilterBatchOptions {
 export interface FilterPendingOptions extends FilterBatchOptions {
   maxBatches?: number;
   concurrency?: number;
+  /** Milliseconds to wait between sequential batch calls to respect rate limits. */
+  batchDelayMs?: number;
 }
 
 async function processBatch(
@@ -195,11 +198,23 @@ export async function filterPendingPostings(
       ? batches.slice(0, options.maxBatches)
       : batches;
 
-  const outcomes = await withConcurrency(
-    selectedBatches,
-    options.concurrency ?? LLM_FILTER_CONCURRENCY,
-    (batch) => processBatch(batch, options)
-  );
+  const delayMs = options.batchDelayMs ?? 0;
+  const outcomes: BatchOutcome[] = [];
+
+  if (delayMs > 0 || (options.concurrency ?? LLM_FILTER_CONCURRENCY) === 1) {
+    // Sequential with optional rate-limit delay between OpenAI calls
+    for (let i = 0; i < selectedBatches.length; i++) {
+      if (i > 0 && delayMs > 0) await sleep(delayMs);
+      outcomes.push(await processBatch(selectedBatches[i], options));
+    }
+  } else {
+    const parallel = await withConcurrency(
+      selectedBatches,
+      options.concurrency ?? LLM_FILTER_CONCURRENCY,
+      (batch) => processBatch(batch, options)
+    );
+    outcomes.push(...parallel);
+  }
 
   let processed = 0;
   let succeeded = 0;
