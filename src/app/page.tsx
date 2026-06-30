@@ -8,6 +8,7 @@ import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
 import { SourceStatusComparison } from "@/components/dashboard/source-status-comparison";
 import { safeDashboardData } from "@/lib/db/safe-queries";
 import { env } from "@/lib/env";
+import { RefreshButton } from "@/components/dashboard/refresh-button";
 
 export const dynamic = "force-dynamic";
 
@@ -116,6 +117,8 @@ export default async function DashboardPage({
               Click any tile to drill into the underlying records.
             </p>
           </div>
+          <div className="flex items-center gap-2">
+          <RefreshButton />
           <div className="inline-flex rounded-xl border border-amber-900/15 bg-white/50 p-1 backdrop-blur">
             {WINDOW_OPTIONS.map((opt) => (
               <Link
@@ -131,6 +134,7 @@ export default async function DashboardPage({
                 {opt.label}
               </Link>
             ))}
+          </div>
           </div>
         </div>
         <StatsCards stats={data.stats} timeWindow={timeWindow} />

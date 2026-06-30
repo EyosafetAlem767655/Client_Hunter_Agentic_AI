@@ -208,23 +208,21 @@ def scrape_jobicy(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
 
 def scrape_wwr(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
     import xml.etree.ElementTree as ET
-    terms = [
-        "medical+receptionist", "patient+coordinator", "medical+billing",
-        "prior+authorization", "insurance+verification", "medical+administrative",
-        "appointment+scheduler", "medical+records", "referral+coordinator",
-        "medical+biller", "revenue+cycle", "dental+receptionist",
-        "intake+coordinator", "scheduling+coordinator",
+    # Category feeds return consistent listings; search RSS returns empty for
+    # medical terms since WWR is tech-focused. LLM filter picks relevant ones.
+    category_feeds = [
+        "https://weworkremotely.com/categories/remote-customer-support-jobs.rss",
+        "https://weworkremotely.com/categories/remote-management-and-finance-jobs.rss",
+        "https://weworkremotely.com/categories/remote-business-exec-and-management-jobs.rss",
+        "https://weworkremotely.com/categories/remote-all-other-jobs.rss",
     ]
     seen: set[str] = set()
     jobs: list[dict[str, Any]] = []
-    for term in terms:
+    for feed_url in category_feeds:
         if len(jobs) >= limit:
             break
         try:
-            r = _get(
-                f"https://weworkremotely.com/remote-jobs/search.rss?term={term}",
-                timeout=12,
-            )
+            r = _get(feed_url, timeout=12)
             r.raise_for_status()
             try:
                 root = ET.fromstring(r.content)

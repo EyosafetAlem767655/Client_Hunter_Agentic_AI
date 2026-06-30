@@ -1,12 +1,14 @@
 import type { RawPosting } from "@/types";
 import { BaseScraper } from "./base";
 
-const SEARCH_TERMS = [
-  "medical+receptionist", "patient+coordinator", "medical+billing",
-  "prior+authorization", "insurance+verification", "medical+administrative",
-  "appointment+scheduler", "medical+records", "referral+coordinator",
-  "medical+biller", "revenue+cycle", "dental+receptionist",
-  "intake+coordinator", "scheduling+coordinator",
+// Category RSS feeds — these consistently have listings; search RSS returns
+// empty for medical terms since WWR is tech-focused. We fetch broad admin/
+// support categories and rely on the LLM filter to pick relevant postings.
+const CATEGORY_FEEDS = [
+  "https://weworkremotely.com/categories/remote-customer-support-jobs.rss",
+  "https://weworkremotely.com/categories/remote-management-and-finance-jobs.rss",
+  "https://weworkremotely.com/categories/remote-business-exec-and-management-jobs.rss",
+  "https://weworkremotely.com/categories/remote-all-other-jobs.rss",
 ];
 
 export class WwrDomScraper extends BaseScraper {
@@ -19,27 +21,22 @@ export class WwrDomScraper extends BaseScraper {
     const out: RawPosting[] = [];
     const seen = new Set<string>();
 
-    for (const term of SEARCH_TERMS) {
+    for (const feedUrl of CATEGORY_FEEDS) {
       if (out.length >= limit) break;
       try {
-        const url = `https://weworkremotely.com/remote-jobs/search.rss?term=${term}`;
-        const res = await this.fetchWithRetry(url);
+        const res = await this.fetchWithRetry(feedUrl);
         const xml = await res.text();
 
-        // Parse RSS XML manually (no external XML parser needed — the format is simple)
         const items = xml.match(/<item>([\s\S]*?)<\/item>/g) ?? [];
         for (const item of items) {
           if (out.length >= limit) break;
 
-          // Extract <link> — in RSS 2.0 it sits between tags with no attr
           const linkMatch = item.match(/<link>\s*(https?:\/\/[^\s<]+)/);
-          // Fallback: GUID often holds the URL
           const guidMatch = item.match(/<guid[^>]*>\s*(https?:\/\/[^\s<]+)/);
           const link = (linkMatch?.[1] ?? guidMatch?.[1] ?? "").trim();
           if (!link || seen.has(link)) continue;
           seen.add(link);
 
-          // Title: may be CDATA wrapped
           const titleRaw = (item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) ??
             item.match(/<title>(.*?)<\/title>/))?.[1]?.trim() ?? "";
 
@@ -68,7 +65,7 @@ export class WwrDomScraper extends BaseScraper {
           });
         }
       } catch {
-        // Move to next term
+        // Move to next feed
       }
     }
     return out;

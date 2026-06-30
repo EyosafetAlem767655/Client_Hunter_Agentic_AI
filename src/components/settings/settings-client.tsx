@@ -364,8 +364,8 @@ export function SettingsClient({
     let filter = { processed: 0, relevant: 0 };
     try {
       filter = await runFilterLoop();
-    } catch {
-      /* filter errors are shown via toast inside runFilterLoop */
+    } catch (e) {
+      showToast("err", `Filter failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     }
 
     // Refresh discovery progress bar

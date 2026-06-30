@@ -240,11 +240,11 @@ describe("JobicyScraper", () => {
 describe("WwrDomScraper", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("parses WWR RSS feed and dedupes by URL", async () => {
+  it("parses WWR category RSS feed and dedupes by URL", async () => {
     const rss = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
-    <title>WeWorkRemotely</title>
+    <title>WeWorkRemotely - Customer Support</title>
     <item>
       <title><![CDATA[Acme Health: Medical Receptionist]]></title>
       <link>https://weworkremotely.com/remote-jobs/acme-health-medical-receptionist</link>
