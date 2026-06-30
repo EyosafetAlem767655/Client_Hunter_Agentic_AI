@@ -10,8 +10,10 @@ import {
   lt,
   ne,
   notInArray,
+  or,
   sql,
 } from "drizzle-orm";
+import { PROMPT_VERSION } from "@/lib/llm/prompts";
 
 const NON_CONTACT_SOURCE_TYPES = ["skipped", "no_contact_url"];
 import type { RawPosting } from "@/types";
@@ -95,7 +97,13 @@ export async function listUnfilteredPostings(limit: number) {
     .select({ posting: jobPostings })
     .from(jobPostings)
     .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
-    .where(and(isNull(filteredJobs.id), visiblePostingSource()))
+    .where(
+      and(
+        // Never filtered, OR filtered with an older prompt (needs re-evaluation)
+        or(isNull(filteredJobs.id), ne(filteredJobs.promptVersion, PROMPT_VERSION)),
+        visiblePostingSource()
+      )
+    )
     .limit(limit);
 }
 
@@ -111,20 +119,24 @@ export async function insertFilteredJob(data: {
   promptVersion: string;
 }) {
   const db = getDb();
+  const values = {
+    postingId: data.postingId,
+    isRelevant: data.isRelevant,
+    score: data.score,
+    roleCategory: data.roleCategory,
+    fitReason: data.fitReason,
+    suggestedRegions: data.suggestedRegions,
+    estimatedSalaryRange: data.estimatedSalaryRange,
+    llmModel: data.llmModel,
+    promptVersion: data.promptVersion,
+  };
   const [row] = await db
     .insert(filteredJobs)
-    .values({
-      postingId: data.postingId,
-      isRelevant: data.isRelevant,
-      score: data.score,
-      roleCategory: data.roleCategory,
-      fitReason: data.fitReason,
-      suggestedRegions: data.suggestedRegions,
-      estimatedSalaryRange: data.estimatedSalaryRange,
-      llmModel: data.llmModel,
-      promptVersion: data.promptVersion,
+    .values(values)
+    .onConflictDoUpdate({
+      target: filteredJobs.postingId,
+      set: { ...values, filteredAt: new Date() },
     })
-    .onConflictDoNothing()
     .returning();
   return row;
 }
@@ -553,16 +565,12 @@ export async function getDashboardStats(timeWindow = "7d") {
     .from(jobPostings)
     .where(postingWhere);
 
-  // "Relevant" and "Contacts" are pipeline queues, not time series — the
-  // 1-by-1 email loop and the outreach pipeline both process every row
-  // ever marked relevant, regardless of when it was filtered. So we
-  // always show the total here; otherwise the dashboard reads "0 relevant"
-  // while the loop is happily processing jobs from a previous day.
+  // Relevant is a pipeline queue — show total ever, no time window.
+  // Direct count on filteredJobs avoids the and(eq, sql`true`) Drizzle quirk.
   const [relevant] = await db
     .select({ total: count() })
     .from(filteredJobs)
-    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
-    .where(and(eq(filteredJobs.isRelevant, true), visiblePostingSource()));
+    .where(eq(filteredJobs.isRelevant, true));
 
   const [withContacts] = await db
     .select({ total: count() })
