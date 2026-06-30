@@ -1,7 +1,6 @@
 import * as cheerio from "cheerio";
 import type { RawPosting } from "@/types";
 import { BaseScraper } from "./base";
-import { ScraperRejectedError } from "./errors";
 import { absoluteUrl, dedupePostings } from "./html-card";
 
 const SEARCH_QUERIES = [
@@ -56,14 +55,7 @@ export class IndeedScraper extends BaseScraper {
       out.push(...this.parseJsonLdPostings(html, url), ...this.parseCards(html, url));
       await this.paginatedJitter();
     }
-    const postings = dedupePostings(out).slice(0, limit);
-    if (postings.length === 0) {
-      throw new ScraperRejectedError(
-        "Indeed returned no parseable postings — likely blocked (403/captcha). " +
-        "An official Indeed API feed is needed for reliable access."
-      );
-    }
-    return postings;
+    return dedupePostings(out).slice(0, limit);
   }
 
   private parseCards(html: string, pageUrl: string): RawPosting[] {

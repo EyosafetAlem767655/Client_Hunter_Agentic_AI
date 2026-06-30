@@ -425,17 +425,22 @@ export function SettingsClient({
           "ok",
           `${label}: ${data.count ?? 0} found, ${data.inserted ?? 0} new — filtering…`
         );
-        setLoading("Filter");
-        try {
-          const filter = await runFilterLoop();
-          showToast("ok", `${label} done — ${filter.relevant} relevant jobs`);
-        } catch {
-          /* toast already shown inside runFilterLoop */
-        } finally {
-          setLoading(null);
-        }
       } else {
         showToast("err", `${label} failed: ${data.error ?? "Unknown error"}`);
+      }
+      // Always run the filter — picks up pending jobs from this scrape AND any
+      // previous scrapes that haven't been filtered yet.
+      setLoading("Filter");
+      try {
+        const filter = await runFilterLoop();
+        showToast("ok", `Filter done — ${filter.relevant} new relevant jobs`);
+      } catch (e) {
+        showToast(
+          "err",
+          `Filter failed: ${e instanceof Error ? e.message : "Unknown error"}`
+        );
+      } finally {
+        setLoading(null);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Request failed";

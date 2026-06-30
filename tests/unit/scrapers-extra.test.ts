@@ -361,7 +361,7 @@ describe("IndeedScraper", () => {
     expect(out[0].title).toBe("Customer Service Rep");
   });
 
-  it("throws ScraperRejectedError when page yields no postings", async () => {
+  it("returns empty array when page yields no postings (blocked/captcha)", async () => {
     const html = "<html><body><p>We could not find any jobs.</p></body></html>";
     vi.stubGlobal(
       "fetch",
@@ -373,9 +373,8 @@ describe("IndeedScraper", () => {
       })
     );
 
-    await expect(new IndeedScraper("bot@example.com").fetch(10)).rejects.toThrow(
-      /Indeed returned no parseable postings/
-    );
+    const out = await new IndeedScraper("bot@example.com").fetch(10);
+    expect(out).toEqual([]);
   });
 });
 

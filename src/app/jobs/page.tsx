@@ -25,15 +25,18 @@ const WINDOWS: Array<{ value: string; label: string }> = [
   { value: "all", label: "All time" },
 ];
 
+const PAGE_SIZE = 50;
+
 export const dynamic = "force-dynamic";
 
 export default async function JobsPage({
   searchParams,
 }: {
-  searchParams?: { status?: string; window?: string };
+  searchParams?: { status?: string; window?: string; page?: string };
 }) {
   const activeStatus = searchParams?.status ?? "all";
-  const activeWindow = searchParams?.window ?? "24h";
+  const activeWindow = searchParams?.window ?? "7d";
+  const currentPage = Math.max(1, Number(searchParams?.page ?? 1));
   const timeWindow = activeWindow === "all" ? undefined : activeWindow;
 
   let jobs: JobRow[] = [];
@@ -44,8 +47,8 @@ export default async function JobsPage({
     const { items, total: rowTotal } = await listJobsPaginated({
       status: activeStatus === "all" ? undefined : activeStatus,
       timeWindow,
-      page: 1,
-      pageSize: 100,
+      page: currentPage,
+      pageSize: PAGE_SIZE,
     });
     total = rowTotal;
     jobs = (items as JobListItem[]).map((row) => ({
@@ -68,6 +71,8 @@ export default async function JobsPage({
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load jobs";
   }
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-6">
@@ -126,6 +131,82 @@ export default async function JobsPage({
 
       {error && <DbErrorBanner message={error} />}
       {!error && <JobsTable jobs={jobs} />}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-1 pt-2">
+          {currentPage > 1 && (
+            <Link
+              href={{
+                pathname: "/jobs",
+                query: {
+                  ...(activeStatus !== "all" ? { status: activeStatus } : {}),
+                  window: activeWindow,
+                  page: currentPage - 1,
+                },
+              }}
+              className="rounded-lg border border-border/40 px-3 py-1.5 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition"
+            >
+              ← Prev
+            </Link>
+          )}
+
+          {Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter(
+              (p) =>
+                p === 1 ||
+                p === totalPages ||
+                Math.abs(p - currentPage) <= 2
+            )
+            .reduce<(number | "...")[]>((acc, p, idx, arr) => {
+              if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("...");
+              acc.push(p);
+              return acc;
+            }, [])
+            .map((p, i) =>
+              p === "..." ? (
+                <span key={`ellipsis-${i}`} className="px-2 text-muted-foreground text-sm">
+                  …
+                </span>
+              ) : (
+                <Link
+                  key={p}
+                  href={{
+                    pathname: "/jobs",
+                    query: {
+                      ...(activeStatus !== "all" ? { status: activeStatus } : {}),
+                      window: activeWindow,
+                      page: p,
+                    },
+                  }}
+                  className={`rounded-lg border px-3 py-1.5 text-sm transition ${
+                    p === currentPage
+                      ? "border-amber-700/60 bg-amber-100/60 font-medium text-foreground"
+                      : "border-border/40 text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                  }`}
+                >
+                  {p}
+                </Link>
+              )
+            )}
+
+          {currentPage < totalPages && (
+            <Link
+              href={{
+                pathname: "/jobs",
+                query: {
+                  ...(activeStatus !== "all" ? { status: activeStatus } : {}),
+                  window: activeWindow,
+                  page: currentPage + 1,
+                },
+              }}
+              className="rounded-lg border border-border/40 px-3 py-1.5 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition"
+            >
+              Next →
+            </Link>
+          )}
+        </div>
+      )}
     </div>
   );
 }
