@@ -1,33 +1,17 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { ArrowRight, Globe2, Settings2, Sparkles, Zap } from "lucide-react";
-import { StatsCards } from "@/components/dashboard/stats-cards";
 import { StatusIndicator } from "@/components/dashboard/status-indicator";
-import { TrendChart } from "@/components/dashboard/trend-chart";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
-import { SourceStatusComparison } from "@/components/dashboard/source-status-comparison";
+import { LiveStatsSection } from "@/components/dashboard/live-stats-section";
 import { safeDashboardData } from "@/lib/db/safe-queries";
 import { env } from "@/lib/env";
-import { RefreshButton } from "@/components/dashboard/refresh-button";
 
 export const dynamic = "force-dynamic";
 
-const WINDOW_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "24h", label: "24h" },
-  { value: "7d", label: "7d" },
-  { value: "30d", label: "30d" },
-];
-
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams?: { window?: string };
-}) {
-  const requested = searchParams?.window ?? "24h";
-  const timeWindow = WINDOW_OPTIONS.some((o) => o.value === requested)
-    ? requested
-    : "24h";
-  const data = await safeDashboardData(timeWindow);
+export default async function DashboardPage() {
+  const data = await safeDashboardData("24h");
   const dryRun = env.DRY_RUN;
 
   return (
@@ -99,51 +83,10 @@ export default async function DashboardPage({
 
       {!data.ok && <DbErrorBanner message={data.error} />}
 
-      {/* KPIs */}
-      <section>
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-semibold uppercase tracking-wider text-primary/80">
-              {timeWindow === "24h"
-                ? "Last 24 hours"
-                : timeWindow === "7d"
-                  ? "Last 7 days"
-                  : "Last 30 days"}
-            </span>
-            <h2 className="text-2xl font-bold tracking-tight">
-              Pipeline at a glance
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Click any tile to drill into the underlying records.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-          <RefreshButton />
-          <div className="inline-flex rounded-xl border border-amber-900/15 bg-white/50 p-1 backdrop-blur">
-            {WINDOW_OPTIONS.map((opt) => (
-              <Link
-                key={opt.value}
-                href={`/?window=${opt.value}`}
-                scroll={false}
-                className={`rounded-lg px-3 py-1.5 text-sm transition ${
-                  timeWindow === opt.value
-                    ? "bg-gradient-to-r from-amber-700 to-orange-600 text-white shadow"
-                    : "text-foreground/70 hover:text-foreground"
-                }`}
-              >
-                {opt.label}
-              </Link>
-            ))}
-          </div>
-          </div>
-        </div>
-        <StatsCards stats={data.stats} timeWindow={timeWindow} />
-      </section>
-
-      {/* Trend */}
-      <section>
-        <TrendChart trend={data.trend} />
-      </section>
+      {/* Live KPIs — client component, auto-refreshes every 15 s */}
+      <Suspense fallback={<div className="h-40 animate-pulse rounded-2xl bg-amber-100/40" />}>
+        <LiveStatsSection />
+      </Suspense>
 
       {/* Activity */}
       <section>
@@ -153,15 +96,6 @@ export default async function DashboardPage({
           subtitle="Everything the agent did, in order."
         />
         <RecentActivity events={data.activity} />
-      </section>
-
-      <section>
-        <SectionHeader
-          eyebrow="Source health"
-          title="Job-site scrape status"
-          subtitle="Latest scrape result for each configured source."
-        />
-        <SourceStatusComparison sources={data.sourceStatuses} />
       </section>
     </div>
   );
