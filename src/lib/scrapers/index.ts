@@ -21,6 +21,7 @@ export const ENABLED_SOURCES: JobSource[] = [
   "jobicy",
   "wwr_dom",
   "linkedin",
+  "indeed",
   "hn",
 ];
 
@@ -31,6 +32,7 @@ export function getEnabledScrapers(): BaseScraper[] {
     new JobicyScraper(contact),
     new WwrDomScraper(contact),
     new LinkedInScraper(contact),
+    new IndeedScraper(contact),
     new HnHiringScraper(contact),
   ];
 }

@@ -9,7 +9,7 @@ export const JOB_SOURCE_META = {
   // Sources below are disabled — kept in the type for historical DB rows
   wellfound: { label: "Wellfound", requested: false },
   monster: { label: "Monster", requested: false },
-  indeed: { label: "Indeed", requested: false },
+  indeed: { label: "Indeed", requested: true },
   remote_co: { label: "Remote.co", requested: false },
   remoteok: { label: "RemoteOK", requested: false },
   // Sources below are disabled — kept in the type for historical DB rows
@@ -31,6 +31,7 @@ export const ENABLED_SOURCES: JobSource[] = [
   "jobicy",
   "wwr_dom",
   "linkedin",
+  "indeed",
   "hn",
 ];
 

@@ -47,7 +47,7 @@ MEDICAL_KEYWORDS = [
     "patient recall",
 ]
 
-VALID_SOURCES = {"remotive", "jobicy", "wwr_dom", "linkedin", "hn"}
+VALID_SOURCES = {"remotive", "jobicy", "wwr_dom", "linkedin", "indeed", "hn"}
 
 # ── Auth & import helpers ──────────────────────────────────────────────────────
 
@@ -316,9 +316,17 @@ def scrape_hn(limit: int = 100) -> tuple[list[dict[str, Any]], str]:
 
 def scrape_linkedin(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
     queries = [
-        "medical+receptionist", "patient+coordinator", "medical+biller",
-        "prior+authorization+specialist", "insurance+verification+specialist",
-        "medical+administrative+assistant", "appointment+scheduler",
+        "medical+receptionist", "front+desk+receptionist", "front+office+coordinator",
+        "patient+service+representative", "patient+access+representative",
+        "appointment+scheduler", "scheduling+coordinator",
+        "patient+coordinator", "patient+care+coordinator",
+        "patient+intake+specialist", "intake+coordinator",
+        "medical+administrative+assistant", "medical+office+assistant",
+        "medical+secretary", "medical+records+clerk", "health+information+clerk",
+        "data+entry+clerk+medical", "insurance+verification+specialist",
+        "eligibility+benefits+verification", "prior+authorization+specialist",
+        "authorization+coordinator", "medical+biller", "medical+billing+specialist",
+        "accounts+receivable+medical", "claims+processor+medical",
         "revenue+cycle+specialist", "referral+coordinator", "dental+receptionist",
     ]
     seen: set[str] = set()
@@ -614,6 +622,178 @@ def scrape_wellfound_requests(limit: int = 100) -> list[dict[str, Any]]:
     return jobs
 
 
+# ── Indeed (requests + optional Playwright fallback) ──────────────────────────
+
+_INDEED_QUERIES = [
+    "medical+receptionist", "front+desk+receptionist", "patient+coordinator",
+    "patient+care+coordinator", "patient+intake+specialist",
+    "medical+administrative+assistant", "appointment+scheduler",
+    "prior+authorization+specialist", "insurance+verification+specialist",
+    "medical+biller", "medical+billing+specialist", "revenue+cycle+specialist",
+    "accounts+receivable+medical", "referral+coordinator", "dental+receptionist",
+]
+
+# Remote work filter: sc=0kf:attr(DSQF7) = Work from Home attribute
+_INDEED_URL = (
+    "https://www.indeed.com/jobs?q={q}&l=Remote&sort=date&fromage=7"
+    "&sc=0kf%3Aattr%28DSQF7%29%3B"
+)
+
+
+def _parse_indeed_page(html: str, seen: set[str]) -> list[dict[str, Any]]:
+    jobs: list[dict[str, Any]] = []
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Try embedded React/mosaic JSON first (fastest, most data)
+    for script in soup.select("script"):
+        text = script.string or ""
+        match = re.search(
+            r'window\.mosaic\.providerData\["mosaic-provider-jobcards"\]\s*=\s*(\{[\s\S]+?\});',
+            text,
+        )
+        if not match:
+            continue
+        try:
+            data = json.loads(match.group(1))
+            results = (
+                (data.get("metaData") or {})
+                .get("mosaicProviderJobCardsModel") or {}
+            ).get("results") or []
+            for item in results:
+                job_id = item.get("jobkey") or ""
+                title = item.get("displayTitle") or ""
+                if not job_id or not title:
+                    continue
+                url = f"https://www.indeed.com/viewjob?jk={job_id}"
+                if url in seen:
+                    continue
+                seen.add(url)
+                city = item.get("jobLocationCity") or ""
+                state = item.get("jobLocationState") or ""
+                location = ", ".join(filter(None, [city, state])) or "Remote"
+                pub_ms = item.get("pubDate")
+                posted_at = None
+                if isinstance(pub_ms, (int, float)):
+                    from datetime import datetime, timezone
+                    posted_at = datetime.fromtimestamp(pub_ms / 1000, tz=timezone.utc).isoformat()
+                jobs.append(_job(
+                    source="indeed",
+                    url=url,
+                    title=title,
+                    company=item.get("company") or "",
+                    location=location,
+                    description=item.get("snippet") or title,
+                    posted_at=posted_at,
+                ))
+        except Exception:
+            pass
+        if jobs:
+            return jobs
+
+    # Fallback: parse visible HTML job cards
+    for card in soup.select("[data-testid='slider_item'], .job_seen_beacon, .tapItem"):
+        link = card.select_one("h2.jobTitle a, [data-testid='jobTitle'] a")
+        href = (link.get("href") or "") if link else ""
+        if not href:
+            href = (card.select_one("a[href*='/rc/clk']") or {}).get("href") or ""
+        if not href:
+            continue
+        if href.startswith("/"):
+            href = f"https://www.indeed.com{href}"
+        if href in seen:
+            continue
+        seen.add(href)
+        title_el = card.select_one("h2.jobTitle, [data-testid='jobTitle']")
+        title = title_el.get_text(strip=True) if title_el else ""
+        if not title:
+            continue
+        company_el = card.select_one(".companyName, [data-testid='company-name']")
+        loc_el = card.select_one(".companyLocation, [data-testid='text-location']")
+        jobs.append(_job(
+            source="indeed",
+            url=href,
+            title=title,
+            company=(company_el.get_text(strip=True) if company_el else ""),
+            location=(loc_el.get_text(strip=True) if loc_el else "Remote"),
+        ))
+    return jobs
+
+
+def scrape_indeed_requests(limit: int = 200) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    jobs: list[dict[str, Any]] = []
+    for q in _INDEED_QUERIES:
+        if len(jobs) >= limit:
+            break
+        try:
+            r = _get(_INDEED_URL.format(q=q), timeout=14)
+            if r.status_code == 403:
+                break
+            r.raise_for_status()
+            found = _parse_indeed_page(r.text, seen)
+            jobs.extend(found)
+        except Exception:
+            pass
+    return jobs
+
+
+def scrape_indeed_playwright(sync_playwright, limit: int = 200) -> list[dict[str, Any]]:
+    priority = [
+        "medical+receptionist", "patient+coordinator",
+        "prior+authorization+specialist", "medical+biller",
+        "insurance+verification+specialist", "medical+administrative+assistant",
+    ]
+    seen: set[str] = set()
+    jobs: list[dict[str, Any]] = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        )
+        try:
+            ctx = browser.new_context(
+                user_agent=BROWSER_UA,
+                extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
+            )
+            ctx.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
+            for q in priority:
+                if len(jobs) >= limit:
+                    break
+                page = ctx.new_page()
+                try:
+                    page.goto(
+                        _INDEED_URL.format(q=q),
+                        wait_until="domcontentloaded",
+                        timeout=18000,
+                    )
+                    page.wait_for_timeout(2500)
+                    html = page.content()
+                    jobs.extend(_parse_indeed_page(html, seen))
+                except Exception:
+                    pass
+                finally:
+                    page.close()
+        finally:
+            browser.close()
+    return jobs
+
+
+def scrape_indeed(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
+    jobs = scrape_indeed_requests(limit)
+    if jobs:
+        return jobs, "requests"
+    # Requests got blocked — try Playwright
+    sync_playwright = _try_playwright_import()
+    if sync_playwright:
+        jobs = scrape_indeed_playwright(sync_playwright, limit)
+        if jobs:
+            return jobs, "playwright"
+    return [], "none"
+
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 def scrape_source(source: str) -> tuple[list[dict[str, Any]], str]:
@@ -627,6 +807,8 @@ def scrape_source(source: str) -> tuple[list[dict[str, Any]], str]:
         return scrape_hn()
     if source == "linkedin":
         return scrape_linkedin()
+    if source == "indeed":
+        return scrape_indeed()
     return [], "none"
 
 

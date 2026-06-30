@@ -5,9 +5,36 @@ import { ScraperRejectedError } from "./errors";
 import { absoluteUrl, dedupePostings } from "./html-card";
 
 const SEARCH_QUERIES = [
-  "virtual+assistant+remote",
-  "customer+support+remote",
-  "customer+service+remote",
+  "medical+receptionist",
+  "front+desk+receptionist",
+  "front+office+coordinator",
+  "patient+service+representative",
+  "patient+access+representative",
+  "appointment+scheduler",
+  "scheduling+coordinator",
+  "patient+coordinator",
+  "patient+care+coordinator",
+  "patient+intake+specialist",
+  "intake+coordinator",
+  "medical+administrative+assistant",
+  "medical+office+assistant",
+  "medical+secretary",
+  "medical+records+clerk",
+  "health+information+clerk",
+  "data+entry+clerk+medical",
+  "office+coordinator+medical",
+  "insurance+verification+specialist",
+  "eligibility+benefits+verification",
+  "prior+authorization+specialist",
+  "authorization+coordinator",
+  "medical+biller",
+  "medical+billing+specialist",
+  "medical+billing+coding",
+  "accounts+receivable+medical",
+  "claims+processor+medical",
+  "revenue+cycle+specialist",
+  "referral+coordinator",
+  "dental+receptionist",
 ];
 
 export class IndeedScraper extends BaseScraper {
@@ -20,7 +47,7 @@ export class IndeedScraper extends BaseScraper {
     const out: RawPosting[] = [];
     for (const query of SEARCH_QUERIES) {
       if (out.length >= limit) break;
-      const url = `https://www.indeed.com/jobs?q=${query}&l=Remote&sort=date&fromage=14`;
+      const url = `https://www.indeed.com/jobs?q=${query}&l=Remote&sort=date&fromage=7&sc=0kf%3Aattr%28DSQF7%29%3B`;
       const parsed = new URL(url);
       if (!(await this.respectRobots(parsed.origin, parsed.pathname + parsed.search))) continue;
       const response = await this.fetchWithRetry(url);
