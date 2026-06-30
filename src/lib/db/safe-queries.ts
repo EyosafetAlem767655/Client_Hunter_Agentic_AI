@@ -2,7 +2,7 @@ import {
   getDashboardStats,
   getEmailsSentPerDay,
   getLastSuccessfulRunAt,
-  getLatestScrapeSourceStatuses,
+  getSourceScrapeCounts,
   listRecentEvents,
 } from "./queries";
 
@@ -22,7 +22,7 @@ export async function safeDashboardData(timeWindow: string = "24h") {
       getEmailsSentPerDay(30),
       listRecentEvents(20, 0),
       getLastSuccessfulRunAt(),
-      getLatestScrapeSourceStatuses(),
+      getSourceScrapeCounts(),
     ]);
 
     return {
@@ -58,7 +58,7 @@ export async function safeDashboardData(timeWindow: string = "24h") {
         createdAt: string;
       }>,
       lastRunAt: null as string | null,
-      sourceStatuses: [] as Awaited<ReturnType<typeof getLatestScrapeSourceStatuses>>,
+      sourceStatuses: [] as Awaited<ReturnType<typeof getSourceScrapeCounts>>,
     };
   }
 }

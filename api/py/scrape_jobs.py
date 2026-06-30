@@ -204,13 +204,16 @@ def scrape_jobicy(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
     return jobs, "requests"
 
 
-# ── We Work Remotely (requests + BS4) ─────────────────────────────────────────
+# ── We Work Remotely (RSS feed — more stable than HTML scraping) ──────────────
 
 def scrape_wwr(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
+    import xml.etree.ElementTree as ET
     terms = [
         "medical+receptionist", "patient+coordinator", "medical+billing",
         "prior+authorization", "insurance+verification", "medical+administrative",
         "appointment+scheduler", "medical+records", "referral+coordinator",
+        "medical+biller", "revenue+cycle", "dental+receptionist",
+        "intake+coordinator", "scheduling+coordinator",
     ]
     seen: set[str] = set()
     jobs: list[dict[str, Any]] = []
@@ -219,33 +222,51 @@ def scrape_wwr(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
             break
         try:
             r = _get(
-                f"https://weworkremotely.com/remote-jobs/search?term={term}",
+                f"https://weworkremotely.com/remote-jobs/search.rss?term={term}",
                 timeout=12,
             )
             r.raise_for_status()
-            soup = BeautifulSoup(r.text, "html.parser")
-            for li in soup.select("li.new-listing-container"):
-                a = li.select_one("a[href*='/remote-jobs/']")
-                if not a:
+            try:
+                root = ET.fromstring(r.content)
+            except ET.ParseError:
+                continue
+            for item in root.findall(".//item"):
+                link_el = item.find("link")
+                # <link> in RSS is tricky — text may be after the element
+                link = ""
+                if link_el is not None:
+                    link = (link_el.text or "").strip()
+                    if not link and link_el.tail:
+                        link = link_el.tail.strip()
+                # Fallback to GUID
+                if not link:
+                    guid_el = item.find("guid")
+                    link = (guid_el.text or "").strip() if guid_el is not None else ""
+                if not link or link in seen:
                     continue
-                href = a.get("href", "")
-                url = f"https://weworkremotely.com{href}" if href.startswith("/") else href
-                if not url or url in seen:
+                seen.add(link)
+                raw_title = (item.findtext("title") or "").strip()
+                # WWR title format in RSS: "<![CDATA[Company: Job Title]]>" or "Company: Job Title"
+                if ":" in raw_title:
+                    company, title = raw_title.split(":", 1)
+                    company = company.strip()
+                    title = title.strip()
+                else:
+                    title = raw_title
+                    company = ""
+                region_el = item.find("{https://weworkremotely.com}region")
+                region = (region_el.text or "Remote").strip() if region_el is not None else "Remote"
+                description = (item.findtext("description") or title).strip()
+                description = re.sub(r"<[^>]+>", " ", description)[:500]
+                if not title:
                     continue
-                seen.add(url)
-                title_el = (
-                    li.select_one(".new-listing__header__title")
-                    or li.select_one("h4")
-                    or li.select_one(".title")
-                )
-                company_el = li.select_one(".new-listing__company-name")
-                loc_el = li.select_one(".new-listing__categories__category")
                 jobs.append(_job(
                     source="wwr_dom",
-                    url=url,
-                    title=title_el.get_text(strip=True) if title_el else "",
-                    company=company_el.get_text(strip=True) if company_el else "",
-                    location=loc_el.get_text(strip=True) if loc_el else "Remote",
+                    url=link,
+                    title=title,
+                    company=company,
+                    location=region,
+                    description=description,
                 ))
         except Exception:
             pass

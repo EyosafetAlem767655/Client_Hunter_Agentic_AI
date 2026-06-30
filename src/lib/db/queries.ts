@@ -618,6 +618,34 @@ export async function getDashboardStats(timeWindow = "7d") {
   };
 }
 
+/**
+ * Reads source status directly from job_postings — works for per-site
+ * manual scrapes that don't create agent_run entries.
+ */
+export async function getSourceScrapeCounts(): Promise<ScrapeSourceStatus[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ source: jobPostings.source, total: count() })
+    .from(jobPostings)
+    .where(visiblePostingSource())
+    .groupBy(jobPostings.source);
+
+  const bySource = new Map(rows.map((r) => [r.source as RawPosting["source"], r.total]));
+
+  return REQUESTED_JOB_SOURCES.map((source) => {
+    const cnt = bySource.get(source) ?? 0;
+    return cnt > 0
+      ? {
+          source,
+          label: jobSourceLabel(source),
+          ok: true as const,
+          status: "scraped" as ScrapeSourceStatus["status"],
+          count: cnt,
+        }
+      : notAttemptedSourceStatus(source);
+  });
+}
+
 export async function getLatestScrapeSourceStatuses(): Promise<ScrapeSourceStatus[]> {
   const db = getDb();
   const runs = await db

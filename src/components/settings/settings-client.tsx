@@ -116,10 +116,33 @@ export function SettingsClient({
     >
   >({});
 
+  // Restore token + scrape results from sessionStorage on mount
   useEffect(() => {
     const saved = sessionStorage.getItem(TOKEN_KEY);
     if (saved) setToken(saved);
+    try {
+      const savedState = sessionStorage.getItem("site_scrape_state");
+      if (savedState) {
+        const parsed = JSON.parse(savedState) as Record<string, { loading: boolean; ok?: boolean; count?: number; inserted?: number; durationMs?: number; error?: string }>;
+        // Clear any in-flight loading flags — they won't resolve after navigation
+        for (const key of Object.keys(parsed)) {
+          parsed[key].loading = false;
+        }
+        setSiteScrapeState(parsed);
+      }
+    } catch {
+      // ignore corrupt storage
+    }
   }, []);
+
+  // Persist scrape state so results survive tab navigation
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("site_scrape_state", JSON.stringify(siteScrapeState));
+    } catch {
+      // ignore storage errors
+    }
+  }, [siteScrapeState]);
 
   // Pull initial discovery progress so the bar shows even before kickoff.
   useEffect(() => {

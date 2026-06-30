@@ -240,37 +240,38 @@ describe("JobicyScraper", () => {
 describe("WwrDomScraper", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("parses WWR HTML category pages and dedupes URLs", async () => {
-    const html = `
-      <html><body>
-        <ul>
-          <li class="new-listing-container">
-            <a href="/remote-jobs/acme-virtual-assistant">
-              <h4 class="new-listing__header__title">Virtual Assistant</h4>
-            </a>
-            <span class="new-listing__company-name">Acme</span>
-            <span class="new-listing__categories__category">USA Only</span>
-          </li>
-          <li class="new-listing-container">
-            <a href="/remote-jobs/widget-customer-success">
-              <h4 class="new-listing__header__title">Customer Success</h4>
-            </a>
-            <span class="new-listing__company-name">WidgetCo</span>
-            <span class="new-listing__categories__category">Europe Only</span>
-          </li>
-        </ul>
-      </body></html>`;
+  it("parses WWR RSS feed and dedupes by URL", async () => {
+    const rss = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>WeWorkRemotely</title>
+    <item>
+      <title><![CDATA[Acme Health: Medical Receptionist]]></title>
+      <link>https://weworkremotely.com/remote-jobs/acme-health-medical-receptionist</link>
+      <guid>https://weworkremotely.com/remote-jobs/acme-health-medical-receptionist</guid>
+      <region>USA Only</region>
+    </item>
+    <item>
+      <title><![CDATA[WidgetCo: Patient Coordinator]]></title>
+      <link>https://weworkremotely.com/remote-jobs/widgetco-patient-coordinator</link>
+      <guid>https://weworkremotely.com/remote-jobs/widgetco-patient-coordinator</guid>
+      <region>Anywhere</region>
+    </item>
+  </channel>
+</rss>`;
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(htmlResponse(html)));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => rss }));
 
     const out = await new WwrDomScraper("bot@example.com").fetch(10);
     expect(out.length).toBeGreaterThanOrEqual(2);
     expect(out[0].source).toBe("wwr_dom");
     expect(out[0].url).toMatch(/^https:\/\/weworkremotely\.com\/remote-jobs\//);
     expect(out[0].title).toBeTruthy();
+    expect(out[0].company).toBe("Acme Health");
+    expect(out[1].title).toBe("Patient Coordinator");
   });
 
-  it("returns an empty array when all category URLs fail", async () => {
+  it("returns an empty array when all RSS requests fail", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockRejectedValue(new Error("blocked"))

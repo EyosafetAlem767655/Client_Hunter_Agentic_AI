@@ -1,94 +1,74 @@
-import * as cheerio from "cheerio";
 import type { RawPosting } from "@/types";
 import { BaseScraper } from "./base";
 
-/**
- * DOM scraper for WeWorkRemotely VA / customer-support / admin categories.
- *
- * Parses the public HTML listing pages with cheerio. Used as a fallback
- * when the RSS endpoint or JSON sources are blocked. We sit explicitly
- * within categories that match the VA brief.
- */
-const CATEGORY_URLS = [
-  "https://weworkremotely.com/remote-jobs/search?term=medical+receptionist",
-  "https://weworkremotely.com/remote-jobs/search?term=patient+coordinator",
-  "https://weworkremotely.com/remote-jobs/search?term=medical+billing",
-  "https://weworkremotely.com/remote-jobs/search?term=prior+authorization",
-  "https://weworkremotely.com/remote-jobs/search?term=insurance+verification",
-  "https://weworkremotely.com/remote-jobs/search?term=medical+administrative",
-  "https://weworkremotely.com/remote-jobs/search?term=revenue+cycle",
-  "https://weworkremotely.com/remote-jobs/search?term=appointment+scheduler",
-  "https://weworkremotely.com/remote-jobs/search?term=referral+coordinator",
+const SEARCH_TERMS = [
+  "medical+receptionist", "patient+coordinator", "medical+billing",
+  "prior+authorization", "insurance+verification", "medical+administrative",
+  "appointment+scheduler", "medical+records", "referral+coordinator",
+  "medical+biller", "revenue+cycle", "dental+receptionist",
+  "intake+coordinator", "scheduling+coordinator",
 ];
 
 export class WwrDomScraper extends BaseScraper {
   constructor(contactEmail: string) {
     super("wwr_dom", contactEmail);
-    this.acceptHeader = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
+    this.acceptHeader = "application/rss+xml,application/xml;q=0.9,*/*;q=0.8";
   }
 
   async fetch(limit: number): Promise<RawPosting[]> {
     const out: RawPosting[] = [];
     const seen = new Set<string>();
 
-    for (const url of CATEGORY_URLS) {
+    for (const term of SEARCH_TERMS) {
       if (out.length >= limit) break;
       try {
+        const url = `https://weworkremotely.com/remote-jobs/search.rss?term=${term}`;
         const res = await this.fetchWithRetry(url);
-        const html = await res.text();
-        const $ = cheerio.load(html);
+        const xml = await res.text();
 
-        // WWR uses <li class="feature"> / <li class="new-listing-container"> per role
-        const items = $("li.new-listing-container, section.jobs li").toArray();
-
-        for (const el of items) {
+        // Parse RSS XML manually (no external XML parser needed — the format is simple)
+        const items = xml.match(/<item>([\s\S]*?)<\/item>/g) ?? [];
+        for (const item of items) {
           if (out.length >= limit) break;
-          const li = $(el);
-          const link = li.find("a[href*='/remote-jobs/']").first();
-          const href = link.attr("href");
-          if (!href) continue;
-          const fullUrl = href.startsWith("http")
-            ? href
-            : `https://weworkremotely.com${href}`;
 
-          if (seen.has(fullUrl)) continue;
-          seen.add(fullUrl);
+          // Extract <link> — in RSS 2.0 it sits between tags with no attr
+          const linkMatch = item.match(/<link>\s*(https?:\/\/[^\s<]+)/);
+          // Fallback: GUID often holds the URL
+          const guidMatch = item.match(/<guid[^>]*>\s*(https?:\/\/[^\s<]+)/);
+          const link = (linkMatch?.[1] ?? guidMatch?.[1] ?? "").trim();
+          if (!link || seen.has(link)) continue;
+          seen.add(link);
 
-          const title =
-            li
-              .find(".new-listing__header__title, .title, h4")
-              .first()
-              .text()
-              .trim() || link.text().trim();
-          const company =
-            li
-              .find(".new-listing__company-name, .company")
-              .first()
-              .text()
-              .trim() || "Unknown";
-          const region =
-            li
-              .find(".new-listing__categories__category, .region")
-              .first()
-              .text()
-              .trim() || "Remote";
+          // Title: may be CDATA wrapped
+          const titleRaw = (item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) ??
+            item.match(/<title>(.*?)<\/title>/))?.[1]?.trim() ?? "";
 
+          let title = titleRaw;
+          let company = "Unknown";
+          if (titleRaw.includes(": ")) {
+            const idx = titleRaw.indexOf(": ");
+            company = titleRaw.slice(0, idx).trim();
+            title = titleRaw.slice(idx + 2).trim();
+          }
           if (!title) continue;
 
+          const regionMatch = item.match(/<region>(.*?)<\/region>/);
+          const location = regionMatch?.[1]?.trim() || "Remote";
+
           out.push({
-            source: this.source,
-            externalId: this.hashId(fullUrl),
-            url: fullUrl,
+            source: "wwr_dom",
+            externalId: this.hashId(link),
+            url: link,
             title,
             company,
-            location: region,
-            description: `${title} at ${company}. ${region}.`,
+            location,
+            description: `${title} at ${company}. ${location}.`,
             postedAt: null,
-            raw: { fullUrl, title, company, region },
+            raw: { link, titleRaw },
           });
         }
       } catch {
-        // Move to next category URL
+        // Move to next term
       }
     }
     return out;

@@ -15,7 +15,7 @@ export function normalizeEnv(
   }
 
   if (!source.OPENAI_FILTER_MODEL) {
-    source.OPENAI_FILTER_MODEL = "gpt-4o-mini";
+    source.OPENAI_FILTER_MODEL = "gpt-4.1";
   }
 
   if (!source.OPENAI_DRAFT_MODEL) {
@@ -59,7 +59,7 @@ export function normalizeEnv(
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   OPENAI_API_KEY: z.string().min(1),
-  OPENAI_FILTER_MODEL: z.string().default("gpt-4o-mini"),
+  OPENAI_FILTER_MODEL: z.string().default("gpt-4.1"),
   OPENAI_DRAFT_MODEL: z.string().default("gpt-4o"),
   OPENAI_URL_FILTER_MODEL: z.string().default("gpt-5.5"),
   OPENAI_EMAIL_EXTRACT_MODEL: z.string().default("gpt-5.5"),
