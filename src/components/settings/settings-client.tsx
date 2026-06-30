@@ -413,6 +413,18 @@ export function SettingsClient({
       showToast("err", "Unauthorized — enter ADMIN_TOKEN first.");
       return;
     }
+
+    // Indeed blocks server-side HTTP clients. Open the actual search page in
+    // the user's browser so their real session loads the jobs — the server
+    // scrapes in parallel using Chrome TLS fingerprint (curl_cffi).
+    if (source === "indeed") {
+      window.open(
+        "https://www.indeed.com/jobs?q=medical+receptionist&l=Remote&sort=date&fromage=7&sc=0kf%3Aattr%28DSQF7%29%3B",
+        "_blank",
+        "noopener,noreferrer"
+      );
+    }
+
     const label = jobSourceLabel(source);
     setSiteScrapeState((prev) => ({ ...prev, [source]: { loading: true } }));
     try {
@@ -933,7 +945,8 @@ export function SettingsClient({
                 <span className="text-sm font-medium">Scrape by site</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Click a site to open a headless browser, scroll to the bottom, and scrape jobs — filter runs automatically after.
+                Click a site to scrape — filter runs automatically after.{" "}
+                <span className="text-amber-700/80 font-medium">Indeed</span> opens in your browser tab (uses your real session) while the server scrapes in parallel.
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {ENABLED_SOURCES.map((source) => {

@@ -741,11 +741,27 @@ def _parse_indeed_page(html: str, seen: set[str]) -> list[dict[str, Any]]:
 def scrape_indeed_requests(limit: int = 200) -> list[dict[str, Any]]:
     seen: set[str] = set()
     jobs: list[dict[str, Any]] = []
+
+    # Prefer curl_cffi: it impersonates Chrome's TLS fingerprint so Indeed's
+    # bot-detection sees a real browser rather than a Python HTTP client.
+    _cffi_session = None
+    try:
+        from curl_cffi import requests as _cffi  # type: ignore
+        _cffi_session = _cffi.Session(impersonate="chrome")
+    except Exception:
+        pass
+
     for q in _INDEED_QUERIES:
         if len(jobs) >= limit:
             break
         try:
-            r = _get(_INDEED_URL.format(q=q), timeout=14)
+            url = _INDEED_URL.format(q=q)
+            if _cffi_session is not None:
+                r = _cffi_session.get(
+                    url, headers=HTTP_HEADERS, timeout=14, allow_redirects=True
+                )
+            else:
+                r = _get(url, timeout=14)
             if r.status_code == 403:
                 break
             r.raise_for_status()

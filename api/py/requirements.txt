@@ -1,6 +1,10 @@
 requests>=2.32.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
+# curl_cffi bundles curl-impersonate, which mimics Chrome's TLS fingerprint.
+# This lets the Indeed scraper bypass bot-detection that blocks plain requests.
+# No system libcurl needed — bundled wheel works on Vercel Lambda (Linux x86_64).
+curl_cffi>=0.7.0
 # Playwright is optional — when present the contact scraper uses headless
 # Chromium for JS-rendered DOM. Without it (default Vercel Python image),
 # the endpoint falls back to requests + BeautifulSoup for static HTML.
