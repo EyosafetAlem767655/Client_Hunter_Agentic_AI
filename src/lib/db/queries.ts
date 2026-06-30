@@ -565,12 +565,14 @@ export async function getDashboardStats(timeWindow = "7d") {
     .from(jobPostings)
     .where(postingWhere);
 
-  // Relevant is a pipeline queue — show total ever, no time window.
-  // Direct count on filteredJobs avoids the and(eq, sql`true`) Drizzle quirk.
   const [relevant] = await db
     .select({ total: count() })
     .from(filteredJobs)
-    .where(eq(filteredJobs.isRelevant, true));
+    .where(
+      since
+        ? and(eq(filteredJobs.isRelevant, true), gte(filteredJobs.filteredAt, since))
+        : eq(filteredJobs.isRelevant, true)
+    );
 
   const [withContacts] = await db
     .select({ total: count() })
@@ -890,9 +892,7 @@ export async function listJobsPaginated(params: {
   } else if (params.status === "irrelevant") {
     conditions.push(eq(filteredJobs.isRelevant, false));
   }
-  // Don't time-window when the user explicitly asked for a pipeline status
-  // — they want to see the queue, not "what was added in the last 24 h".
-  if (since && params.status !== "relevant" && params.status !== "irrelevant") {
+  if (since) {
     conditions.push(gte(filteredJobs.filteredAt, since));
   }
 
@@ -913,6 +913,36 @@ export async function listJobsPaginated(params: {
     .where(where);
 
   return { items, total: totalRow?.total ?? 0 };
+}
+
+export async function saveJobFeedback(
+  postingId: number,
+  feedback: string,
+  notes: string | null
+) {
+  const db = getDb();
+  await db
+    .update(filteredJobs)
+    .set({ userFeedback: feedback, userNotes: notes, feedbackAt: new Date() })
+    .where(eq(filteredJobs.postingId, postingId));
+}
+
+export async function getFeedbackExamples(limit = 30) {
+  const db = getDb();
+  return db
+    .select({
+      title: jobPostings.title,
+      company: jobPostings.company,
+      isRelevant: filteredJobs.isRelevant,
+      fitReason: filteredJobs.fitReason,
+      userFeedback: filteredJobs.userFeedback,
+      userNotes: filteredJobs.userNotes,
+    })
+    .from(filteredJobs)
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
+    .where(isNotNull(filteredJobs.userFeedback))
+    .orderBy(desc(filteredJobs.feedbackAt))
+    .limit(limit);
 }
 
 /**

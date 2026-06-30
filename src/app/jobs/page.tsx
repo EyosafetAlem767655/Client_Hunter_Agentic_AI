@@ -67,6 +67,8 @@ export default async function JobsPage({
         : null,
       contactEmail: row.contact?.email ?? null,
       contactUrl: row.contact?.contactUrl ?? null,
+      userFeedback: row.filtered?.userFeedback ?? null,
+      userNotes: row.filtered?.userNotes ?? null,
     }));
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load jobs";

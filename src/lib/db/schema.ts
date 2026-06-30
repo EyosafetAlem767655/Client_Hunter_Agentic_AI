@@ -52,6 +52,9 @@ export const filteredJobs = pgTable(
     filteredAt: timestamp("filtered_at").defaultNow().notNull(),
     llmModel: text("llm_model").notNull(),
     promptVersion: text("prompt_version").notNull(),
+    userFeedback: text("user_feedback"),
+    userNotes: text("user_notes"),
+    feedbackAt: timestamp("feedback_at"),
   },
   (table) => [index("filtered_jobs_score_idx").on(table.score)]
 );
