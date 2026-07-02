@@ -291,7 +291,7 @@ function FeedbackList({
 
               {entry.userNotes && (
                 <p className="mt-1.5 rounded-lg bg-muted/40 px-3 py-2 text-sm italic text-muted-foreground">
-                  "{entry.userNotes}"
+                  &ldquo;{entry.userNotes}&rdquo;
                 </p>
               )}
 
