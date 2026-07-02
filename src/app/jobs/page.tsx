@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { JobsTable, type JobRow } from "@/components/jobs/jobs-table";
 import { FeedbackTab, type FeedbackEntry } from "@/components/jobs/feedback-tab";
+import { LeadStatusTab } from "@/components/jobs/lead-status-tab";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
 import { listJobsPaginated, listAllFeedback, getSetting } from "@/lib/db/queries";
 import { jobSourceLabel } from "@/lib/job-sources";
@@ -16,7 +17,7 @@ const TABS: Array<{ key: string; label: string; status?: string }> = [
   { key: "all", label: "All scraped" },
   { key: "relevant", label: "Relevant", status: "relevant" },
   { key: "unfiltered", label: "Unfiltered", status: "unfiltered" },
-  { key: "with-contact", label: "With contact", status: "with-contact" },
+  { key: "lead-status", label: "Lead Status", status: "lead-status" },
   { key: "feedback", label: "Feedback", status: "feedback" },
 ];
 
@@ -44,10 +45,17 @@ export default async function JobsPage({
   let jobs: JobRow[] = [];
   let feedbackEntries: FeedbackEntry[] = [];
   let lastTrainedAt: string | null = null;
+  let clayAutoEnrich = false;
   let error: string | null = null;
   let total = 0;
 
-  if (activeStatus === "feedback") {
+  if (activeStatus === "lead-status") {
+    try {
+      clayAutoEnrich = (await getSetting("clay_auto_enrich_enabled")) === "true";
+    } catch {
+      // non-fatal — component defaults to false
+    }
+  } else if (activeStatus === "feedback") {
     try {
       const [rawEntries, learnedRulesStr] = await Promise.all([
         listAllFeedback(),
@@ -170,10 +178,15 @@ export default async function JobsPage({
       {!error && activeStatus === "feedback" && (
         <FeedbackTab entries={feedbackEntries} lastTrainedAt={lastTrainedAt} />
       )}
-      {!error && activeStatus !== "feedback" && <JobsTable jobs={jobs} />}
+      {!error && activeStatus === "lead-status" && (
+        <LeadStatusTab initialAutoEnrich={clayAutoEnrich} />
+      )}
+      {!error && activeStatus !== "feedback" && activeStatus !== "lead-status" && (
+        <JobsTable jobs={jobs} />
+      )}
 
       {/* Pagination */}
-      {activeStatus !== "feedback" && totalPages > 1 && (
+      {activeStatus !== "feedback" && activeStatus !== "lead-status" && totalPages > 1 && (
         <div className="flex items-center justify-center gap-1 pt-2">
           {currentPage > 1 && (
             <Link

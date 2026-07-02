@@ -11,6 +11,7 @@ export async function GET() {
   const dryRun = (await getSetting("DRY_RUN")) ?? String(env.DRY_RUN);
   const agentEnabled =
     (await getSetting("AGENT_ENABLED")) ?? String(env.AGENT_ENABLED);
+  const clayAutoEnrich = (await getSetting("clay_auto_enrich_enabled")) ?? "false";
 
   return NextResponse.json({
     env: {
@@ -21,10 +22,12 @@ export async function GET() {
       ADMIN_TOKEN: maskSecret(env.ADMIN_TOKEN),
       DRY_RUN: env.DRY_RUN,
       AGENT_ENABLED: env.AGENT_ENABLED,
+      CLAY_API_KEY: maskSecret(env.CLAY_API_KEY ?? ""),
     },
     settings: {
       DRY_RUN: dryRun === "true",
       AGENT_ENABLED: agentEnabled === "true",
+      CLAY_AUTO_ENRICH: clayAutoEnrich === "true",
     },
   });
 }
@@ -32,6 +35,7 @@ export async function GET() {
 const patchSchema = z.object({
   DRY_RUN: z.boolean().optional(),
   AGENT_ENABLED: z.boolean().optional(),
+  CLAY_AUTO_ENRICH: z.boolean().optional(),
 });
 
 export async function PATCH(request: Request) {
@@ -49,6 +53,9 @@ export async function PATCH(request: Request) {
   }
   if (body.data.AGENT_ENABLED !== undefined) {
     await setSetting("AGENT_ENABLED", String(body.data.AGENT_ENABLED));
+  }
+  if (body.data.CLAY_AUTO_ENRICH !== undefined) {
+    await setSetting("clay_auto_enrich_enabled", String(body.data.CLAY_AUTO_ENRICH));
   }
 
   return NextResponse.json({ ok: true });

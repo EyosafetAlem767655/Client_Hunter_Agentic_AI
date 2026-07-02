@@ -8,6 +8,7 @@ import {
   inArray,
   isNull,
   lt,
+  lte,
   ne,
   notInArray,
   or,
@@ -618,10 +619,22 @@ export async function getDashboardStats(timeWindow = "7d") {
     .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
     .where(and(eq(outreachEmails.status, "replied"), visiblePostingSource()));
 
+  const [enriched] = await db
+    .select({ total: count() })
+    .from(contacts)
+    .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
+    .where(
+      and(
+        inArray(contacts.sourceType, ["clay_enriched", "manually_enriched"]),
+        visiblePostingSource()
+      )
+    );
+
   return {
     scraped: scraped?.total ?? 0,
     relevant: relevant?.total ?? 0,
     contactsFound: withContacts?.total ?? 0,
+    leadsEnriched: enriched?.total ?? 0,
     drafted: drafted?.total ?? 0,
     sent: sent?.total ?? 0,
     replied: replied?.total ?? 0,
@@ -1071,4 +1084,105 @@ export async function listOutreachPaginated(params: {
     .where(where);
 
   return { items, total: totalRow?.total ?? 0 };
+}
+
+const ENRICHED_SOURCE_TYPES = ["clay_enriched", "manually_enriched"] as const;
+
+export async function listLeadStatusJobs(params: {
+  tier: "high" | "mid";
+  page: number;
+  pageSize: number;
+}): Promise<{
+  items: Array<{
+    posting: typeof jobPostings.$inferSelect;
+    filtered: typeof filteredJobs.$inferSelect;
+    contact: typeof contacts.$inferSelect | null;
+    isEnriched: boolean;
+  }>;
+  total: number;
+}> {
+  const db = getDb();
+  const offset = (params.page - 1) * params.pageSize;
+  const scoreMin = params.tier === "high" ? 90 : 70;
+  const scoreMax = params.tier === "high" ? 100 : 89;
+
+  const where = and(
+    eq(filteredJobs.isRelevant, true),
+    gte(filteredJobs.score, scoreMin),
+    lte(filteredJobs.score, scoreMax),
+    visiblePostingSource()
+  );
+
+  const rows = await db
+    .select({
+      posting: jobPostings,
+      filtered: filteredJobs,
+      contact: contacts,
+    })
+    .from(filteredJobs)
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
+    .leftJoin(
+      contacts,
+      and(
+        eq(contacts.postingId, jobPostings.id),
+        inArray(contacts.sourceType, [...ENRICHED_SOURCE_TYPES])
+      )
+    )
+    .where(where)
+    .orderBy(desc(filteredJobs.score))
+    .limit(params.pageSize * 4)
+    .offset(offset);
+
+  // Deduplicate by postingId — a job may have multiple enriched contact rows
+  const seen = new Set<number>();
+  const deduped = rows.filter((r) => {
+    if (seen.has(r.filtered.postingId)) return false;
+    seen.add(r.filtered.postingId);
+    return true;
+  });
+  const items = deduped.slice(0, params.pageSize);
+
+  const [totalRow] = await db
+    .select({ total: count() })
+    .from(filteredJobs)
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
+    .where(where);
+
+  return {
+    items: items.map((r) => ({ ...r, isEnriched: r.contact !== null })),
+    total: totalRow?.total ?? 0,
+  };
+}
+
+export async function markManuallyEnriched(postingId: number): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(contacts)
+    .values({
+      postingId,
+      email: null,
+      contactUrl: null,
+      sourceType: "manually_enriched",
+      confidence: "1.00",
+    })
+    .onConflictDoNothing();
+}
+
+export async function saveClayContacts(
+  postingId: number,
+  items: Array<{ email: string | null; linkedinUrl: string | null }>
+): Promise<number> {
+  let saved = 0;
+  for (const c of items) {
+    if (!c.email && !c.linkedinUrl) continue;
+    await upsertContact({
+      postingId,
+      email: c.email,
+      contactUrl: c.linkedinUrl,
+      sourceType: "clay_enriched",
+      confidence: "0.85",
+    });
+    saved++;
+  }
+  return saved;
 }

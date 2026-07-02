@@ -50,7 +50,9 @@ export type ContactSourceType =
   | "scraped_from_site"
   | "langsearch_scraped"
   | "url_only"
-  | "no_contact_url";
+  | "no_contact_url"
+  | "clay_enriched"
+  | "manually_enriched";
 
 export interface DiscoveredContact {
   email: string | null;

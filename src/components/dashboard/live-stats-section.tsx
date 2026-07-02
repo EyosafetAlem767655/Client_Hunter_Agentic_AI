@@ -16,7 +16,7 @@ import {
 type Stats = {
   scraped: number;
   relevant: number;
-  contactsFound: number;
+  leadsEnriched: number;
   drafted: number;
   sent: number;
   replied: number;
@@ -42,13 +42,13 @@ const META = [
     href: (w: string) => `/jobs?status=relevant&window=${w}`,
   },
   {
-    key: "contactsFound" as const,
-    label: "Contacts",
-    hint: "Discovered emails",
+    key: "leadsEnriched" as const,
+    label: "Leads Enriched",
+    hint: "Clay & manual",
     icon: UserSearch,
     grad: "from-yellow-200/70 via-yellow-100/40 to-transparent",
     ring: "ring-yellow-700/30",
-    href: (w: string) => `/jobs?status=with-contact&window=${w}`,
+    href: () => `/jobs?status=lead-status`,
   },
   {
     key: "drafted" as const,
