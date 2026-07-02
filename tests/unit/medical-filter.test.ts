@@ -15,8 +15,8 @@ vi.mock("@/lib/agent/observability", () => ({
 import {
   filterPendingPostings,
   RULE_FILTER_MODEL,
-  RULE_FILTER_VERSION,
 } from "@/lib/agent/medical-filter";
+import { PROMPT_VERSION } from "@/lib/llm/prompts";
 import { memory } from "@/lib/agent/memory";
 
 function posting(overrides: {
@@ -256,7 +256,7 @@ describe("medical-filter (rule-based)", () => {
     await filterPendingPostings(10);
     const call = vi.mocked(memory.insertFilteredJob).mock.calls[0][0];
     expect(call.llmModel).toBe(RULE_FILTER_MODEL);
-    expect(call.promptVersion).toBe(RULE_FILTER_VERSION);
+    expect(call.promptVersion).toBe(PROMPT_VERSION);
   });
 
   it("returns empty results when no unfiltered postings", async () => {
