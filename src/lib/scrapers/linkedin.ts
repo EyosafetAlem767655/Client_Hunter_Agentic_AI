@@ -1,37 +1,9 @@
 import * as cheerio from "cheerio";
 import type { RawPosting } from "@/types";
 import { BaseScraper } from "./base";
+import { MEDICAL_VA_TITLES } from "./job-titles";
 
-const QUERIES = [
-  "medical receptionist",
-  "front desk receptionist",
-  "front office coordinator",
-  "patient service representative",
-  "patient access representative",
-  "appointment scheduler",
-  "scheduling coordinator",
-  "patient coordinator",
-  "patient care coordinator",
-  "patient intake specialist",
-  "intake coordinator",
-  "medical administrative assistant",
-  "medical office assistant",
-  "medical secretary",
-  "medical records clerk",
-  "health information clerk",
-  "data entry clerk medical",
-  "insurance verification specialist",
-  "eligibility benefits verification",
-  "prior authorization specialist",
-  "authorization coordinator",
-  "medical biller",
-  "medical billing specialist",
-  "accounts receivable medical",
-  "claims processor medical",
-  "revenue cycle specialist",
-  "referral coordinator",
-  "dental receptionist",
-];
+const QUERIES: readonly string[] = MEDICAL_VA_TITLES;
 
 // f_WT=2 = remote work type, f_TPR=r604800 = past week
 // Each location variant has a max page count to control request volume.

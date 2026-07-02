@@ -1,5 +1,6 @@
 import type { RawPosting } from "@/types";
 import { BaseScraper } from "./base";
+import { MEDICAL_VA_TITLES } from "./job-titles";
 
 interface RemotiveJob {
   id: number;
@@ -31,36 +32,9 @@ export class RemotiveScraper extends BaseScraper {
   }
 
   async fetch(limit: number): Promise<RawPosting[]> {
-    const queries = [
-      `https://remotive.com/api/remote-jobs?search=medical+receptionist&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=front+desk+receptionist&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=patient+service+representative&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=patient+access+representative&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=appointment+scheduler&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=scheduling+coordinator&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=patient+coordinator&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=patient+care+coordinator&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=patient+intake+specialist&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=intake+coordinator&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=medical+administrative+assistant&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=medical+office+assistant&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=medical+records+clerk&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=health+information+clerk&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=insurance+verification+specialist&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=prior+authorization+specialist&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=authorization+coordinator&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=medical+biller&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=medical+billing+specialist&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=medical+billing+coding&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=accounts+receivable+medical&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=claims+processor+medical&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=revenue+cycle+specialist&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=collections+specialist+medical&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=referral+coordinator&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=dental+receptionist&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=patient+recall+coordinator&limit=${limit}`,
-      `https://remotive.com/api/remote-jobs?search=data+entry+medical&limit=${limit}`,
-    ];
+    const queries = MEDICAL_VA_TITLES.map(
+      (t) => `https://remotive.com/api/remote-jobs?search=${t.replace(/ /g, "+")}&limit=${limit}`
+    );
 
     const seen = new Set<string>();
     const all: RawPosting[] = [];

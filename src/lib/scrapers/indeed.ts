@@ -2,39 +2,9 @@ import * as cheerio from "cheerio";
 import type { RawPosting } from "@/types";
 import { BaseScraper } from "./base";
 import { absoluteUrl, dedupePostings } from "./html-card";
+import { MEDICAL_VA_TITLES } from "./job-titles";
 
-const SEARCH_QUERIES = [
-  "medical+receptionist",
-  "front+desk+receptionist",
-  "front+office+coordinator",
-  "patient+service+representative",
-  "patient+access+representative",
-  "appointment+scheduler",
-  "scheduling+coordinator",
-  "patient+coordinator",
-  "patient+care+coordinator",
-  "patient+intake+specialist",
-  "intake+coordinator",
-  "medical+administrative+assistant",
-  "medical+office+assistant",
-  "medical+secretary",
-  "medical+records+clerk",
-  "health+information+clerk",
-  "data+entry+clerk+medical",
-  "office+coordinator+medical",
-  "insurance+verification+specialist",
-  "eligibility+benefits+verification",
-  "prior+authorization+specialist",
-  "authorization+coordinator",
-  "medical+biller",
-  "medical+billing+specialist",
-  "medical+billing+coding",
-  "accounts+receivable+medical",
-  "claims+processor+medical",
-  "revenue+cycle+specialist",
-  "referral+coordinator",
-  "dental+receptionist",
-];
+const SEARCH_QUERIES = MEDICAL_VA_TITLES.map((t) => t.replace(/ /g, "+"));
 
 export class IndeedScraper extends BaseScraper {
   constructor(contactEmail: string) {

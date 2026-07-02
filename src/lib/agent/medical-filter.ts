@@ -1,5 +1,6 @@
 import { memory } from "./memory";
 import { logEvent } from "./observability";
+import { PROMPT_VERSION } from "@/lib/llm/prompts";
 
 export const RULE_FILTER_MODEL = "rule-based";
 export const RULE_FILTER_VERSION = "2.0.0";
@@ -300,7 +301,7 @@ export async function filterPendingPostings(
       suggestedRegions: result.suggestedRegions,
       estimatedSalaryRange: result.estimatedSalaryRange,
       llmModel: RULE_FILTER_MODEL,
-      promptVersion: RULE_FILTER_VERSION,
+      promptVersion: PROMPT_VERSION,
     });
     succeeded++;
 

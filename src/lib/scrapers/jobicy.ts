@@ -1,5 +1,6 @@
 import type { RawPosting } from "@/types";
 import { BaseScraper } from "./base";
+import { JOBICY_TAGS } from "./job-titles";
 
 interface JobicyJob {
   id: number | string;
@@ -31,19 +32,7 @@ export class JobicyScraper extends BaseScraper {
   }
 
   async fetch(limit: number): Promise<RawPosting[]> {
-    const tagQueries = [
-      "healthcare",
-      "medical",
-      "medical-billing",
-      "medical-records",
-      "patient-services",
-      "patient-coordinator",
-      "medical-receptionist",
-      "prior-authorization",
-      "insurance-verification",
-      "revenue-cycle",
-      "dental",
-    ];
+    const tagQueries: readonly string[] = JOBICY_TAGS;
 
     const seen = new Set<string>();
     const all: RawPosting[] = [];
