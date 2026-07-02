@@ -55,6 +55,7 @@ export const filteredJobs = pgTable(
     userFeedback: text("user_feedback"),
     userNotes: text("user_notes"),
     feedbackAt: timestamp("feedback_at"),
+    manuallyEnriched: boolean("manually_enriched").default(false).notNull(),
   },
   (table) => [index("filtered_jobs_score_idx").on(table.score)]
 );

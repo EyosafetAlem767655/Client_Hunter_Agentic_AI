@@ -621,11 +621,11 @@ export async function getDashboardStats(timeWindow = "7d") {
 
   const [enriched] = await db
     .select({ total: count() })
-    .from(contacts)
-    .innerJoin(jobPostings, eq(jobPostings.id, contacts.postingId))
+    .from(filteredJobs)
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
     .where(
       and(
-        inArray(contacts.sourceType, ["clay_enriched", "manually_enriched"]),
+        eq(filteredJobs.manuallyEnriched, true),
         visiblePostingSource()
       )
     );
@@ -1125,7 +1125,7 @@ export async function listLeadStatusJobs(params: {
       contacts,
       and(
         eq(contacts.postingId, jobPostings.id),
-        inArray(contacts.sourceType, [...ENRICHED_SOURCE_TYPES])
+        eq(contacts.sourceType, "clay_enriched")
       )
     )
     .where(where)
@@ -1149,39 +1149,28 @@ export async function listLeadStatusJobs(params: {
     .where(where);
 
   return {
-    items: items.map((r) => ({ ...r, isEnriched: r.contact !== null })),
+    items: items.map((r) => ({
+      ...r,
+      isEnriched: r.filtered.manuallyEnriched || r.contact !== null,
+    })),
     total: totalRow?.total ?? 0,
   };
 }
 
-// Sentinel email makes the (postingId, email) unique index enforce idempotency correctly.
-// NULLs are distinct in Postgres unique indexes, so null emails can't be used for this.
-const MANUAL_ENRICHED_EMAIL = "__manually_enriched__";
-
 export async function markManuallyEnriched(postingId: number): Promise<void> {
   const db = getDb();
   await db
-    .insert(contacts)
-    .values({
-      postingId,
-      email: MANUAL_ENRICHED_EMAIL,
-      contactUrl: null,
-      sourceType: "manually_enriched",
-      confidence: "1.00",
-    })
-    .onConflictDoNothing();
+    .update(filteredJobs)
+    .set({ manuallyEnriched: true })
+    .where(eq(filteredJobs.postingId, postingId));
 }
 
 export async function unmarkManuallyEnriched(postingId: number): Promise<void> {
   const db = getDb();
   await db
-    .delete(contacts)
-    .where(
-      and(
-        eq(contacts.postingId, postingId),
-        eq(contacts.sourceType, "manually_enriched")
-      )
-    );
+    .update(filteredJobs)
+    .set({ manuallyEnriched: false })
+    .where(eq(filteredJobs.postingId, postingId));
 }
 
 export async function saveClayContacts(
