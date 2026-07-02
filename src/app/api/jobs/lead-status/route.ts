@@ -23,7 +23,10 @@ type ListItem = {
   isEnriched: boolean;
 };
 
+const MANUAL_SENTINEL = "__manually_enriched__";
+
 function toLeadJob(r: ListItem): LeadJob {
+  const isManualMark = r.contact?.sourceType === "manually_enriched";
   return {
     postingId: r.posting.id,
     title: r.posting.title,
@@ -31,8 +34,11 @@ function toLeadJob(r: ListItem): LeadJob {
     url: r.posting.url,
     score: r.filtered.score,
     isEnriched: r.isEnriched,
-    contactEmail: r.contact?.email ?? null,
-    contactUrl: r.contact?.contactUrl ?? null,
+    // Don't surface the sentinel email or manual-mark rows as real contact details
+    contactEmail: (!isManualMark && r.contact?.email && r.contact.email !== MANUAL_SENTINEL)
+      ? r.contact.email
+      : null,
+    contactUrl: (!isManualMark && r.contact?.contactUrl) ? r.contact.contactUrl : null,
   };
 }
 

@@ -182,22 +182,15 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
     }
   }
 
-  async function toggleManual(job: LeadJob) {
+  async function setEnrichmentStatus(job: LeadJob, markAs: boolean) {
     const currentlyEnriched = isEffectivelyEnriched(job);
-    const nextState = !currentlyEnriched;
+    if (markAs === currentlyEnriched) return;
 
     // Optimistic flip
-    setLocalOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(job.postingId, nextState);
-      return next;
-    });
+    setLocalOverrides((prev) => { const n = new Map(prev); n.set(job.postingId, markAs); return n; });
     setActingId(job.postingId);
 
-    const endpoint = nextState
-      ? "/api/jobs/mark-enriched"
-      : "/api/jobs/unmark-enriched";
-
+    const endpoint = markAs ? "/api/jobs/mark-enriched" : "/api/jobs/unmark-enriched";
     try {
       const res = await fetch(endpoint, {
         method: "POST",
@@ -206,14 +199,10 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       broadcastEnrichChange();
-      await fetchData(); // syncs server state; also clears localOverrides
+      await fetchData();
     } catch {
-      // Roll back optimistic change
-      setLocalOverrides((prev) => {
-        const next = new Map(prev);
-        next.set(job.postingId, currentlyEnriched);
-        return next;
-      });
+      // Roll back
+      setLocalOverrides((prev) => { const n = new Map(prev); n.set(job.postingId, currentlyEnriched); return n; });
     } finally {
       setActingId(null);
     }
@@ -359,34 +348,23 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
                   job={job}
                   enrichedOverride={enriched}
                   action={
-                    <button
-                      onClick={() => !acting && toggleManual(job)}
+                    <select
+                      value={acting ? "__saving__" : enriched ? "enriched" : "not-enriched"}
+                      onChange={(e) =>
+                        void setEnrichmentStatus(job, e.target.value === "enriched")
+                      }
                       disabled={acting}
-                      aria-pressed={enriched}
-                      title={enriched ? "Click to undo enrichment mark" : "Click to mark as enriched"}
                       className={cn(
-                        "shrink-0 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1 text-xs font-medium transition disabled:opacity-40",
+                        "shrink-0 cursor-pointer rounded-lg border px-2 py-1 text-xs font-medium transition disabled:cursor-wait disabled:opacity-50",
                         enriched
-                          ? "border-green-600/40 bg-green-50 text-green-700 hover:border-red-400/50 hover:bg-red-50 hover:text-red-700"
-                          : "border-orange-700/40 text-orange-800 hover:bg-orange-50"
+                          ? "border-green-600/40 bg-green-50 text-green-700"
+                          : "border-orange-700/40 bg-white text-orange-800"
                       )}
                     >
-                      <span
-                        className={cn(
-                          "inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px] transition",
-                          enriched
-                            ? "border-green-600 bg-green-600 text-white"
-                            : "border-orange-500 bg-white"
-                        )}
-                      >
-                        {enriched && "✓"}
-                      </span>
-                      {acting
-                        ? "Saving…"
-                        : enriched
-                          ? "Enriched"
-                          : "Mark enriched"}
-                    </button>
+                      {acting && <option value="__saving__">Saving…</option>}
+                      <option value="not-enriched">Not enriched</option>
+                      <option value="enriched">✓ Enriched</option>
+                    </select>
                   }
                 />
               );

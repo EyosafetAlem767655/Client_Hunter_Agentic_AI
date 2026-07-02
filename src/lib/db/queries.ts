@@ -1154,19 +1154,22 @@ export async function listLeadStatusJobs(params: {
   };
 }
 
+// Sentinel email makes the (postingId, email) unique index enforce idempotency correctly.
+// NULLs are distinct in Postgres unique indexes, so null emails can't be used for this.
+const MANUAL_ENRICHED_EMAIL = "__manually_enriched__";
+
 export async function markManuallyEnriched(postingId: number): Promise<void> {
   const db = getDb();
-  try {
-    await db.insert(contacts).values({
+  await db
+    .insert(contacts)
+    .values({
       postingId,
-      email: null,
+      email: MANUAL_ENRICHED_EMAIL,
       contactUrl: null,
       sourceType: "manually_enriched",
       confidence: "1.00",
-    });
-  } catch {
-    // Duplicate insert — already marked; treat as idempotent success
-  }
+    })
+    .onConflictDoNothing();
 }
 
 export async function unmarkManuallyEnriched(postingId: number): Promise<void> {
