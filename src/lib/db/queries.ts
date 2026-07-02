@@ -1156,16 +1156,29 @@ export async function listLeadStatusJobs(params: {
 
 export async function markManuallyEnriched(postingId: number): Promise<void> {
   const db = getDb();
-  await db
-    .insert(contacts)
-    .values({
+  try {
+    await db.insert(contacts).values({
       postingId,
       email: null,
       contactUrl: null,
       sourceType: "manually_enriched",
       confidence: "1.00",
-    })
-    .onConflictDoNothing();
+    });
+  } catch {
+    // Duplicate insert — already marked; treat as idempotent success
+  }
+}
+
+export async function unmarkManuallyEnriched(postingId: number): Promise<void> {
+  const db = getDb();
+  await db
+    .delete(contacts)
+    .where(
+      and(
+        eq(contacts.postingId, postingId),
+        eq(contacts.sourceType, "manually_enriched")
+      )
+    );
 }
 
 export async function saveClayContacts(

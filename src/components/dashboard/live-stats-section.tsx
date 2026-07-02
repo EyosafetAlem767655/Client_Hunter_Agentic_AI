@@ -127,11 +127,23 @@ export function LiveStatsSection() {
     return () => clearInterval(id);
   }, [fetchStats]);
 
-  // Refresh immediately when a lead is manually marked from the Lead Status tab
+  // Refresh immediately when a lead is marked/unmarked — works cross-page via BroadcastChannel
   useEffect(() => {
     const handler = () => void fetchStats(true);
     window.addEventListener("lead-enriched-changed", handler);
-    return () => window.removeEventListener("lead-enriched-changed", handler);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel("lead-enriched");
+      bc.onmessage = handler;
+    } catch {
+      // BroadcastChannel not available in this environment
+    }
+
+    return () => {
+      window.removeEventListener("lead-enriched-changed", handler);
+      bc?.close();
+    };
   }, [fetchStats]);
 
   const windowLabel =

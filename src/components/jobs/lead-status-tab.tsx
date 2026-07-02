@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 
 const TOKEN_KEY = "talentbridge_admin_token";
+const BC_CHANNEL = "lead-enriched";
 
 interface LeadJob {
   postingId: number;
@@ -25,6 +26,17 @@ interface Props {
   initialAutoEnrich: boolean;
 }
 
+function broadcastEnrichChange() {
+  try {
+    const ch = new BroadcastChannel(BC_CHANNEL);
+    ch.postMessage("changed");
+    ch.close();
+  } catch {
+    // BroadcastChannel not available — window event covers same-page case
+  }
+  window.dispatchEvent(new CustomEvent("lead-enriched-changed"));
+}
+
 export function LeadStatusTab({ initialAutoEnrich }: Props) {
   const [autoEnrich, setAutoEnrich] = useState(initialAutoEnrich);
   const [data, setData] = useState<LeadStatusData | null>(null);
@@ -32,17 +44,19 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
   const [togglingAuto, setTogglingAuto] = useState(false);
   const [enrichingAll, setEnrichingAll] = useState(false);
   const [enrichingId, setEnrichingId] = useState<number | null>(null);
-  const [markingId, setMarkingId] = useState<number | null>(null);
-  const [localMarked, setLocalMarked] = useState<Set<number>>(new Set());
+  const [actingId, setActingId] = useState<number | null>(null);
+  // Optimistic overrides: true = locally marked, false = locally unmarked
+  const [localOverrides, setLocalOverrides] = useState<Map<number, boolean>>(new Map());
   const [enrichResult, setEnrichResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch("/api/jobs/lead-status");
+      const res = await fetch("/api/jobs/lead-status", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as LeadStatusData;
       setData(json);
+      setLocalOverrides(new Map()); // clear overrides once server state is fresh
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -59,6 +73,12 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
     return typeof window !== "undefined"
       ? (sessionStorage.getItem(TOKEN_KEY) ?? "")
       : "";
+  }
+
+  function isEffectivelyEnriched(job: LeadJob): boolean {
+    const override = localOverrides.get(job.postingId);
+    if (override !== undefined) return override;
+    return job.isEnriched;
   }
 
   async function toggleAutoEnrich() {
@@ -114,6 +134,7 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
         setEnrichResult(
           `Enriched ${json.enriched ?? 0} jobs · ${json.contactsSaved ?? 0} contacts saved${json.errors?.length ? ` · ${json.errors.length} errors` : ""}`
         );
+        broadcastEnrichChange();
         await fetchData();
       } else {
         setEnrichResult(`Error: ${json.error ?? "Unknown"}`);
@@ -149,6 +170,7 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
       };
       if (json.ok) {
         setEnrichResult(`Saved ${json.contactsSaved ?? 0} contact(s)`);
+        broadcastEnrichChange();
         await fetchData();
       } else {
         setEnrichResult(`Error: ${json.error ?? "Unknown"}`);
@@ -160,28 +182,40 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
     }
   }
 
-  async function markManual(postingId: number) {
-    // Optimistic: flip immediately so the UI responds on click
-    setLocalMarked((prev) => { const next = new Set(prev); next.add(postingId); return next; });
-    setMarkingId(postingId);
+  async function toggleManual(job: LeadJob) {
+    const currentlyEnriched = isEffectivelyEnriched(job);
+    const nextState = !currentlyEnriched;
+
+    // Optimistic flip
+    setLocalOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(job.postingId, nextState);
+      return next;
+    });
+    setActingId(job.postingId);
+
+    const endpoint = nextState
+      ? "/api/jobs/mark-enriched"
+      : "/api/jobs/unmark-enriched";
+
     try {
-      const res = await fetch("/api/jobs/mark-enriched", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ postingId }),
+        body: JSON.stringify({ postingId: job.postingId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      window.dispatchEvent(new CustomEvent("lead-enriched-changed"));
-      void fetchData();
+      broadcastEnrichChange();
+      await fetchData(); // syncs server state; also clears localOverrides
     } catch {
-      // Roll back on failure
-      setLocalMarked((prev) => {
-        const next = new Set(prev);
-        next.delete(postingId);
+      // Roll back optimistic change
+      setLocalOverrides((prev) => {
+        const next = new Map(prev);
+        next.set(job.postingId, currentlyEnriched);
         return next;
       });
     } finally {
-      setMarkingId(null);
+      setActingId(null);
     }
   }
 
@@ -215,7 +249,6 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {/* AUTO / MANUAL toggle */}
             <button
               onClick={toggleAutoEnrich}
               disabled={togglingAuto}
@@ -242,14 +275,12 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
           </div>
         </div>
 
-        {/* Enrich result banner */}
         {enrichResult && (
           <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             {enrichResult}
           </p>
         )}
 
-        {/* Pending sub-section */}
         {highPending.length > 0 && (
           <div className="mb-4">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
@@ -279,7 +310,6 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
           </div>
         )}
 
-        {/* Enriched sub-section */}
         {highEnriched.length > 0 && (
           <div>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-green-700">
@@ -306,44 +336,44 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
       <section>
         <div className="mb-4 rounded-xl border border-orange-900/15 bg-orange-50/30 p-4">
           <h2 className="font-semibold text-foreground">
-            Score 70–89 — Manual Enrichment Needed
+            Score 70–89 — Manual Enrichment
             <span className="ml-2 inline-flex items-center rounded-full bg-orange-200 px-2 py-0.5 text-xs font-medium text-orange-900">
               {data?.mid.total ?? 0} jobs
             </span>
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Research contacts yourself and mark each job as enriched when done.
+            Research contacts yourself, then toggle each job when done. Click again to undo.
           </p>
         </div>
 
         {midItems.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No jobs with score 70–89 yet.
-          </p>
+          <p className="text-sm text-muted-foreground">No jobs with score 70–89 yet.</p>
         ) : (
           <div className="space-y-2">
             {midItems.map((job) => {
-              const enriched = job.isEnriched || localMarked.has(job.postingId);
+              const enriched = isEffectivelyEnriched(job);
+              const acting = actingId === job.postingId;
               return (
                 <LeadJobRow
                   key={job.postingId}
                   job={job}
+                  enrichedOverride={enriched}
                   action={
                     <button
-                      onClick={() => !enriched && markManual(job.postingId)}
-                      disabled={markingId === job.postingId}
+                      onClick={() => !acting && toggleManual(job)}
+                      disabled={acting}
                       aria-pressed={enriched}
-                      title={enriched ? "Marked as enriched" : "Mark as enriched"}
+                      title={enriched ? "Click to undo enrichment mark" : "Click to mark as enriched"}
                       className={cn(
                         "shrink-0 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1 text-xs font-medium transition disabled:opacity-40",
                         enriched
-                          ? "border-green-600/40 bg-green-50 text-green-700 cursor-default"
-                          : "border-orange-700/40 text-orange-800 hover:bg-orange-50 cursor-pointer"
+                          ? "border-green-600/40 bg-green-50 text-green-700 hover:border-red-400/50 hover:bg-red-50 hover:text-red-700"
+                          : "border-orange-700/40 text-orange-800 hover:bg-orange-50"
                       )}
                     >
                       <span
                         className={cn(
-                          "inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px]",
+                          "inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px] transition",
                           enriched
                             ? "border-green-600 bg-green-600 text-white"
                             : "border-orange-500 bg-white"
@@ -351,7 +381,7 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
                       >
                         {enriched && "✓"}
                       </span>
-                      {markingId === job.postingId
+                      {acting
                         ? "Saving…"
                         : enriched
                           ? "Enriched"
@@ -370,13 +400,19 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
 
 function LeadJobRow({
   job,
+  enrichedOverride,
   action,
 }: {
   job: LeadJob;
+  enrichedOverride?: boolean;
   action?: React.ReactNode;
 }) {
+  const enriched = enrichedOverride ?? job.isEnriched;
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/30 bg-white/50 px-4 py-3">
+    <div className={cn(
+      "flex items-center justify-between gap-3 rounded-lg border bg-white/50 px-4 py-3 transition",
+      enriched ? "border-green-200/60" : "border-border/30"
+    )}>
       <div className="min-w-0 flex-1">
         <a
           href={job.url}
