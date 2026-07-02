@@ -1,4 +1,4 @@
-export const PROMPT_VERSION = "4.2.0";
+export const PROMPT_VERSION = "4.3.0";
 
 export const SYSTEM_PROMPT = `You are a relevance filter for a job seeker targeting remote medical administrative positions at US companies.
 
@@ -110,29 +110,37 @@ export function buildFilterPrompt(
 
   let feedbackSection = "";
   if (feedbackExamples && feedbackExamples.length > 0) {
-    const bad = feedbackExamples.filter((e) => e.userFeedback === "bad");
-    const good = feedbackExamples.filter((e) => e.userFeedback === "good");
-    const lines: string[] = [
-      "",
-      "## User feedback on past classifications (use as calibration — adjust your criteria accordingly)",
-    ];
-    if (bad.length > 0) {
-      lines.push("WRONG classifications (user corrected the AI):");
-      for (const e of bad) {
-        const aiVerdict = e.isRelevant ? "relevant" : "not relevant";
-        const note = e.userNotes ? ` Reason: ${e.userNotes}` : "";
-        lines.push(`- "${e.title}" at ${e.company} — AI said ${aiVerdict}, user says NO.${note}`);
+    // 1-2 = AI was wrong, 3 = borderline (omit), 4-5 = AI was correct
+    const wrong = feedbackExamples.filter(
+      (e) => e.userFeedback === "1" || e.userFeedback === "2"
+    );
+    const correct = feedbackExamples.filter(
+      (e) => e.userFeedback === "4" || e.userFeedback === "5"
+    );
+    if (wrong.length > 0 || correct.length > 0) {
+      const lines: string[] = [
+        "",
+        "## User feedback on past classifications (ratings: 1=very wrong … 5=excellent; 3=borderline omitted)",
+        "Use these to calibrate your scoring criteria.",
+      ];
+      if (wrong.length > 0) {
+        lines.push("WRONG classifications — rated 1 or 2 (adjust criteria AWAY from these):");
+        for (const e of wrong) {
+          const aiVerdict = e.isRelevant ? "relevant" : "not relevant";
+          const note = e.userNotes ? ` Note: ${e.userNotes}` : "";
+          lines.push(`- [${e.userFeedback}/5] "${e.title}" at ${e.company} — AI said ${aiVerdict}.${note}`);
+        }
       }
-    }
-    if (good.length > 0) {
-      lines.push("CORRECT classifications (user confirmed the AI):");
-      for (const e of good) {
-        const aiVerdict = e.isRelevant ? "relevant" : "not relevant";
-        const note = e.userNotes ? ` Notes: ${e.userNotes}` : "";
-        lines.push(`- "${e.title}" at ${e.company} — AI said ${aiVerdict}, user confirmed.${note}`);
+      if (correct.length > 0) {
+        lines.push("CORRECT classifications — rated 4 or 5 (reinforce these patterns):");
+        for (const e of correct) {
+          const aiVerdict = e.isRelevant ? "relevant" : "not relevant";
+          const note = e.userNotes ? ` Note: ${e.userNotes}` : "";
+          lines.push(`- [${e.userFeedback}/5] "${e.title}" at ${e.company} — AI said ${aiVerdict}.${note}`);
+        }
       }
+      feedbackSection = lines.join("\n");
     }
-    feedbackSection = lines.join("\n");
   }
 
   return `Score each posting for remote medical administrative fit. Apply the system criteria strictly:

@@ -38,24 +38,36 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+const RATING_META: Record<string, { label: string; activeClass: string; hoverClass: string }> = {
+  "1": { label: "Very bad",  activeClass: "border-red-700/60 bg-red-100 text-red-800",   hoverClass: "hover:border-red-600/40 hover:bg-red-50 hover:text-red-800" },
+  "2": { label: "Bad",       activeClass: "border-red-500/60 bg-red-50 text-red-700",    hoverClass: "hover:border-red-400/40 hover:bg-red-50 hover:text-red-700" },
+  "3": { label: "Okay",      activeClass: "border-amber-500/60 bg-amber-50 text-amber-800", hoverClass: "hover:border-amber-400/40 hover:bg-amber-50 hover:text-amber-800" },
+  "4": { label: "Good",      activeClass: "border-green-500/60 bg-green-50 text-green-800", hoverClass: "hover:border-green-400/40 hover:bg-green-50 hover:text-green-800" },
+  "5": { label: "Excellent", activeClass: "border-green-700/60 bg-green-100 text-green-900", hoverClass: "hover:border-green-600/40 hover:bg-green-100 hover:text-green-900" },
+};
+
 function FeedbackSection({ job }: { job: JobRow }) {
   const [selected, setSelected] = useState<string | null>(job.userFeedback ?? null);
   const [notes, setNotes] = useState(job.userNotes ?? "");
   const [saved, setSaved] = useState(!!job.userFeedback);
   const [saving, setSaving] = useState(false);
+  const [showRequired, setShowRequired] = useState(false);
 
-  async function save(fb: string) {
+  async function save() {
+    if (!selected) return;
+    if (!notes.trim()) {
+      setShowRequired(true);
+      return;
+    }
+    setShowRequired(false);
     setSaving(true);
     try {
       const res = await fetch("/api/jobs/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ postingId: job.id, feedback: fb, notes: notes || null }),
+        body: JSON.stringify({ postingId: job.id, feedback: selected, notes: notes.trim() }),
       });
-      if (res.ok) {
-        setSelected(fb);
-        setSaved(true);
-      }
+      if (res.ok) setSaved(true);
     } catch {
       // ignore
     } finally {
@@ -63,45 +75,52 @@ function FeedbackSection({ job }: { job: JobRow }) {
     }
   }
 
-  function handleButton(fb: string) {
-    setSelected(fb);
+  function handleRating(rating: string) {
+    setSelected(rating);
     setSaved(false);
+    setShowRequired(false);
   }
+
+  const canSave = !!selected && notes.trim().length > 0;
 
   return (
     <div className="mt-4 rounded-lg border border-border/40 p-4">
       <h4 className="mb-3 text-sm font-semibold">Rate this classification</h4>
-      <div className="flex gap-2">
-        <button
-          onClick={() => handleButton("good")}
-          className={cn(
-            "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition",
-            selected === "good"
-              ? "border-green-600/50 bg-green-100 text-green-800"
-              : "border-border/40 text-muted-foreground hover:border-green-600/30 hover:bg-green-50 hover:text-green-800"
-          )}
-        >
-          👍 Correct
-        </button>
-        <button
-          onClick={() => handleButton("bad")}
-          className={cn(
-            "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition",
-            selected === "bad"
-              ? "border-red-600/50 bg-red-100 text-red-800"
-              : "border-border/40 text-muted-foreground hover:border-red-600/30 hover:bg-red-50 hover:text-red-800"
-          )}
-        >
-          👎 Wrong
-        </button>
+      <div className="flex gap-1.5">
+        {(["1", "2", "3", "4", "5"] as const).map((r) => {
+          const meta = RATING_META[r];
+          const isActive = selected === r;
+          return (
+            <button
+              key={r}
+              onClick={() => handleRating(r)}
+              title={meta.label}
+              className={cn(
+                "flex flex-col items-center rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition",
+                isActive
+                  ? meta.activeClass
+                  : `border-border/40 text-muted-foreground ${meta.hoverClass}`
+              )}
+            >
+              <span className="text-sm font-bold">{r}</span>
+              <span className="text-[10px] font-normal leading-tight">{meta.label}</span>
+            </button>
+          );
+        })}
       </div>
       <textarea
         value={notes}
-        onChange={(e) => { setNotes(e.target.value); setSaved(false); }}
-        placeholder="Optional note — why is this wrong? (fed back into the AI filter)"
-        className="mt-3 w-full resize-none rounded-lg border border-border/40 bg-transparent p-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+        onChange={(e) => { setNotes(e.target.value); setSaved(false); setShowRequired(false); }}
+        placeholder="Comment required — justify your rating (fed back into the AI filter)"
+        className={cn(
+          "mt-3 w-full resize-none rounded-lg border bg-transparent p-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30",
+          showRequired ? "border-red-400" : "border-border/40"
+        )}
         rows={2}
       />
+      {showRequired && (
+        <p className="mt-1 text-xs text-red-600">Add a comment before saving</p>
+      )}
       <div className="mt-2 flex items-center justify-between">
         {saved ? (
           <span className="text-xs font-medium text-green-700">✓ Saved</span>
@@ -109,8 +128,8 @@ function FeedbackSection({ job }: { job: JobRow }) {
           <span />
         )}
         <button
-          onClick={() => selected && save(selected)}
-          disabled={!selected || saving}
+          onClick={save}
+          disabled={!selected || saving || (!canSave && !showRequired)}
           className="rounded-lg bg-amber-700 px-3 py-1.5 text-sm text-white transition hover:bg-amber-800 disabled:opacity-40"
         >
           {saving ? "Saving…" : "Save"}
@@ -154,11 +173,20 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
               >
                 <td className="p-4 font-medium">
                   <span className="flex items-center gap-1.5">
-                    {job.userFeedback === "good" && (
-                      <span title="You rated this correct" className="text-xs">👍</span>
-                    )}
-                    {job.userFeedback === "bad" && (
-                      <span title="You rated this wrong" className="text-xs">👎</span>
+                    {job.userFeedback && (
+                      <span
+                        title={`You rated this ${RATING_META[job.userFeedback]?.label ?? job.userFeedback}/5`}
+                        className={cn(
+                          "inline-flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold",
+                          ["1", "2"].includes(job.userFeedback)
+                            ? "bg-red-100 text-red-700"
+                            : job.userFeedback === "3"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-green-100 text-green-700"
+                        )}
+                      >
+                        {job.userFeedback}
+                      </span>
                     )}
                     {job.title}
                   </span>

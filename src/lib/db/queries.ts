@@ -902,7 +902,10 @@ export async function listJobsPaginated(params: {
     .from(filteredJobs)
     .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
     .where(where)
-    .orderBy(desc(filteredJobs.score))
+    .orderBy(
+      sql`date_trunc('day', ${jobPostings.scrapedAt}) DESC`,
+      desc(filteredJobs.score)
+    )
     .limit(params.pageSize)
     .offset(offset);
 
@@ -943,6 +946,25 @@ export async function getFeedbackExamples(limit = 30) {
     .where(isNotNull(filteredJobs.userFeedback))
     .orderBy(desc(filteredJobs.feedbackAt))
     .limit(limit);
+}
+
+export async function listAllFeedback() {
+  const db = getDb();
+  return db
+    .select({
+      postingId: filteredJobs.postingId,
+      title: jobPostings.title,
+      company: jobPostings.company,
+      userFeedback: filteredJobs.userFeedback,
+      userNotes: filteredJobs.userNotes,
+      feedbackAt: filteredJobs.feedbackAt,
+      isRelevant: filteredJobs.isRelevant,
+      fitReason: filteredJobs.fitReason,
+    })
+    .from(filteredJobs)
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
+    .where(isNotNull(filteredJobs.userFeedback))
+    .orderBy(desc(filteredJobs.feedbackAt));
 }
 
 /**
