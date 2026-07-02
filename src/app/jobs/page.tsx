@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { JobsTable, type JobRow } from "@/components/jobs/jobs-table";
+import { FeedbackTab, type FeedbackEntry } from "@/components/jobs/feedback-tab";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
-import { listJobsPaginated } from "@/lib/db/queries";
+import { listJobsPaginated, listAllFeedback, getSetting } from "@/lib/db/queries";
 import { jobSourceLabel } from "@/lib/job-sources";
 import type { contacts, filteredJobs, jobPostings } from "@/lib/db/schema";
 
@@ -16,6 +17,7 @@ const TABS: Array<{ key: string; label: string; status?: string }> = [
   { key: "relevant", label: "Relevant", status: "relevant" },
   { key: "unfiltered", label: "Unfiltered", status: "unfiltered" },
   { key: "with-contact", label: "With contact", status: "with-contact" },
+  { key: "feedback", label: "Feedback", status: "feedback" },
 ];
 
 const WINDOWS: Array<{ value: string; label: string }> = [
@@ -40,38 +42,71 @@ export default async function JobsPage({
   const timeWindow = activeWindow === "all" ? undefined : activeWindow;
 
   let jobs: JobRow[] = [];
+  let feedbackEntries: FeedbackEntry[] = [];
+  let lastTrainedAt: string | null = null;
   let error: string | null = null;
   let total = 0;
 
-  try {
-    const { items, total: rowTotal } = await listJobsPaginated({
-      status: activeStatus === "all" ? undefined : activeStatus,
-      timeWindow,
-      page: currentPage,
-      pageSize: PAGE_SIZE,
-    });
-    total = rowTotal;
-    jobs = (items as JobListItem[]).map((row) => ({
-      id: row.posting.id,
-      title: row.posting.title,
-      company: row.posting.company,
-      source: row.posting.source,
-      sourceLabel: jobSourceLabel(row.posting.source),
-      score: row.filtered?.score ?? null,
-      isRelevant: row.filtered?.isRelevant ?? null,
-      fitReason: row.filtered?.fitReason ?? null,
-      description: row.posting.description,
-      url: row.posting.url,
-      scrapedAt: row.posting.scrapedAt
-        ? new Date(row.posting.scrapedAt).toISOString()
-        : null,
-      contactEmail: row.contact?.email ?? null,
-      contactUrl: row.contact?.contactUrl ?? null,
-      userFeedback: row.filtered?.userFeedback ?? null,
-      userNotes: row.filtered?.userNotes ?? null,
-    }));
-  } catch (e) {
-    error = e instanceof Error ? e.message : "Failed to load jobs";
+  if (activeStatus === "feedback") {
+    try {
+      const [rawEntries, learnedRulesStr] = await Promise.all([
+        listAllFeedback(),
+        getSetting("prompt_learnings"),
+      ]);
+      feedbackEntries = rawEntries.map((r) => ({
+        postingId: r.postingId,
+        title: r.title,
+        company: r.company,
+        description: r.description,
+        url: r.url,
+        userFeedback: r.userFeedback,
+        userNotes: r.userNotes,
+        feedbackAt: r.feedbackAt,
+        isRelevant: r.isRelevant,
+        fitReason: r.fitReason,
+      }));
+      if (learnedRulesStr) {
+        try {
+          const parsed = JSON.parse(learnedRulesStr) as { trainedAt?: string };
+          lastTrainedAt = parsed.trainedAt ?? null;
+        } catch {
+          // ignore
+        }
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to load feedback";
+    }
+  } else {
+    try {
+      const { items, total: rowTotal } = await listJobsPaginated({
+        status: activeStatus === "all" ? undefined : activeStatus,
+        timeWindow,
+        page: currentPage,
+        pageSize: PAGE_SIZE,
+      });
+      total = rowTotal;
+      jobs = (items as JobListItem[]).map((row) => ({
+        id: row.posting.id,
+        title: row.posting.title,
+        company: row.posting.company,
+        source: row.posting.source,
+        sourceLabel: jobSourceLabel(row.posting.source),
+        score: row.filtered?.score ?? null,
+        isRelevant: row.filtered?.isRelevant ?? null,
+        fitReason: row.filtered?.fitReason ?? null,
+        description: row.posting.description,
+        url: row.posting.url,
+        scrapedAt: row.posting.scrapedAt
+          ? new Date(row.posting.scrapedAt).toISOString()
+          : null,
+        contactEmail: row.contact?.email ?? null,
+        contactUrl: row.contact?.contactUrl ?? null,
+        userFeedback: row.filtered?.userFeedback ?? null,
+        userNotes: row.filtered?.userNotes ?? null,
+      }));
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to load jobs";
+    }
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -132,10 +167,13 @@ export default async function JobsPage({
       </div>
 
       {error && <DbErrorBanner message={error} />}
-      {!error && <JobsTable jobs={jobs} />}
+      {!error && activeStatus === "feedback" && (
+        <FeedbackTab entries={feedbackEntries} lastTrainedAt={lastTrainedAt} />
+      )}
+      {!error && activeStatus !== "feedback" && <JobsTable jobs={jobs} />}
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {activeStatus !== "feedback" && totalPages > 1 && (
         <div className="flex items-center justify-center gap-1 pt-2">
           {currentPage > 1 && (
             <Link

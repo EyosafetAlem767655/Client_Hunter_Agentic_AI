@@ -35,6 +35,7 @@ vi.mock("@/lib/agent/memory", () => ({
     setCachedLlm: vi.fn().mockResolvedValue(undefined),
     insertFilteredJob: vi.fn().mockResolvedValue({ id: 1 }),
     getFeedbackExamples: vi.fn().mockResolvedValue([]),
+    getSetting: vi.fn().mockResolvedValue(null),
   },
 }));
 

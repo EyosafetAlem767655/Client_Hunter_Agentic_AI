@@ -955,6 +955,8 @@ export async function listAllFeedback() {
       postingId: filteredJobs.postingId,
       title: jobPostings.title,
       company: jobPostings.company,
+      description: jobPostings.description,
+      url: jobPostings.url,
       userFeedback: filteredJobs.userFeedback,
       userNotes: filteredJobs.userNotes,
       feedbackAt: filteredJobs.feedbackAt,

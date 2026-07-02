@@ -175,17 +175,18 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
                   <span className="flex items-center gap-1.5">
                     {job.userFeedback && (
                       <span
-                        title={`You rated this ${RATING_META[job.userFeedback]?.label ?? job.userFeedback}/5`}
+                        title={`Your rating: ${job.userFeedback}/5 — ${RATING_META[job.userFeedback]?.label ?? ""}`}
                         className={cn(
-                          "inline-flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold",
+                          "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-bold ring-2 shadow-sm",
                           ["1", "2"].includes(job.userFeedback)
-                            ? "bg-red-100 text-red-700"
+                            ? "bg-red-100 text-red-700 ring-red-300"
                             : job.userFeedback === "3"
-                              ? "bg-amber-100 text-amber-700"
-                              : "bg-green-100 text-green-700"
+                              ? "bg-amber-100 text-amber-700 ring-amber-300"
+                              : "bg-green-100 text-green-800 ring-green-300"
                         )}
                       >
-                        {job.userFeedback}
+                        <span>★</span>
+                        <span>{job.userFeedback}</span>
                       </span>
                     )}
                     {job.title}

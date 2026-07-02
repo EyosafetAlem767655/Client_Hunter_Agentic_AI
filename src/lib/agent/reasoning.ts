@@ -3,6 +3,7 @@ import { callOpenAIJson } from "@/lib/llm/client";
 import {
   buildFilterPrompt,
   FeedbackExample,
+  PromptLearnings,
   PROMPT_VERSION,
   SYSTEM_PROMPT,
 } from "@/lib/llm/prompts";
@@ -68,7 +69,8 @@ export interface FilterPendingOptions extends FilterBatchOptions {
 async function processBatch(
   postings: Posting[],
   options: FilterBatchOptions = {},
-  feedbackExamples: FeedbackExample[] = []
+  feedbackExamples: FeedbackExample[] = [],
+  learnedRules?: PromptLearnings
 ): Promise<BatchOutcome> {
   const inputHash = sha256Hex(
     JSON.stringify(postings.map((p) => ({ id: p.id, title: p.title })))
@@ -89,7 +91,8 @@ async function processBatch(
             location: p.location,
             description: p.description,
           })),
-          feedbackExamples
+          feedbackExamples,
+          learnedRules
         ),
         jsonSchema: filteredJobJsonSchema as Record<string, unknown>,
         timeoutMs: options.llmTimeoutMs,
@@ -192,10 +195,14 @@ export async function filterPendingPostings(
   limit: number,
   options: FilterPendingOptions = {}
 ): Promise<FilterRunResult> {
-  const [pending, feedbackExamples] = await Promise.all([
+  const [pending, feedbackExamples, learnedRulesStr] = await Promise.all([
     memory.listUnfilteredPostings(limit),
     memory.getFeedbackExamples(),
+    memory.getSetting("prompt_learnings"),
   ]);
+  const learnedRules = learnedRulesStr
+    ? (JSON.parse(learnedRulesStr) as PromptLearnings)
+    : undefined;
 
   const batches: Posting[][] = [];
   for (let i = 0; i < pending.length; i += FILTER_BATCH_SIZE) {
@@ -213,13 +220,13 @@ export async function filterPendingPostings(
     // Sequential with optional rate-limit delay between OpenAI calls
     for (let i = 0; i < selectedBatches.length; i++) {
       if (i > 0 && delayMs > 0) await sleep(delayMs);
-      outcomes.push(await processBatch(selectedBatches[i], options, feedbackExamples as FeedbackExample[]));
+      outcomes.push(await processBatch(selectedBatches[i], options, feedbackExamples as FeedbackExample[], learnedRules));
     }
   } else {
     const parallel = await withConcurrency(
       selectedBatches,
       options.concurrency ?? LLM_FILTER_CONCURRENCY,
-      (batch) => processBatch(batch, options, feedbackExamples as FeedbackExample[])
+      (batch) => processBatch(batch, options, feedbackExamples as FeedbackExample[], learnedRules)
     );
     outcomes.push(...parallel);
   }

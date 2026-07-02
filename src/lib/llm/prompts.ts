@@ -92,6 +92,61 @@ export interface FeedbackExample {
   userNotes: string | null;
 }
 
+export interface PromptLearnings {
+  summary: string;
+  disqualifiers: string[];
+  positiveSignals: string[];
+  additionalContext: string;
+  trainedAt: string;
+  feedbackCount: number;
+}
+
+export function buildTrainPrompt(
+  feedback: Array<{
+    title: string;
+    company: string;
+    isRelevant: boolean;
+    fitReason: string | null;
+    userFeedback: string | null;
+    userNotes: string | null;
+  }>
+): string {
+  const wrong = feedback.filter((f) => f.userFeedback === "1" || f.userFeedback === "2");
+  const borderline = feedback.filter((f) => f.userFeedback === "3");
+  const correct = feedback.filter((f) => f.userFeedback === "4" || f.userFeedback === "5");
+
+  const fmt = (f: typeof feedback[0]) => {
+    const verdict = f.isRelevant ? "relevant" : "not relevant";
+    const note = f.userNotes ? ` User note: "${f.userNotes}"` : "";
+    return `  - [${f.userFeedback}/5] "${f.title}" at ${f.company} — AI: ${verdict}.${note}`;
+  };
+
+  const sections: string[] = [];
+  if (wrong.length > 0) {
+    sections.push(`WRONG (rated 1-2 — AI made an error):\n${wrong.map(fmt).join("\n")}`);
+  }
+  if (borderline.length > 0) {
+    sections.push(`BORDERLINE (rated 3 — ambiguous, use for context only):\n${borderline.map(fmt).join("\n")}`);
+  }
+  if (correct.length > 0) {
+    sections.push(`CORRECT (rated 4-5 — AI was right):\n${correct.map(fmt).join("\n")}`);
+  }
+
+  return `You are improving a job relevance filter based on user feedback.
+Rating scale: 1=AI very wrong, 2=wrong, 3=borderline, 4=correct, 5=excellent.
+
+${sections.join("\n\n")}
+
+Based on these patterns, propose specific new rules for the filter.
+Be concrete and actionable — reference job titles and company types where possible.
+
+Return JSON:
+- summary: 1-2 sentences on what the feedback reveals about filter weaknesses
+- disqualifiers: new hard disqualifier rules to add (empty array if none)
+- positiveSignals: new positive signal patterns to reinforce (empty array if none)
+- additionalContext: any other guidance (empty string if none)`;
+}
+
 export function buildFilterPrompt(
   postings: Array<{
     title: string;
@@ -99,7 +154,8 @@ export function buildFilterPrompt(
     location: string;
     description: string;
   }>,
-  feedbackExamples?: FeedbackExample[]
+  feedbackExamples?: FeedbackExample[],
+  learnedRules?: PromptLearnings
 ): string {
   const blocks = postings
     .map(
@@ -143,11 +199,32 @@ export function buildFilterPrompt(
     }
   }
 
+  let learnedSection = "";
+  if (learnedRules) {
+    const lines = [
+      "",
+      `## AI-learned rules (from ${learnedRules.feedbackCount} training examples — apply these alongside system criteria)`,
+      `Summary: ${learnedRules.summary}`,
+    ];
+    if (learnedRules.disqualifiers.length > 0) {
+      lines.push("Additional hard disqualifiers:");
+      learnedRules.disqualifiers.forEach((d) => lines.push(`- ${d}`));
+    }
+    if (learnedRules.positiveSignals.length > 0) {
+      lines.push("Additional positive signals:");
+      learnedRules.positiveSignals.forEach((s) => lines.push(`- ${s}`));
+    }
+    if (learnedRules.additionalContext) {
+      lines.push(`Additional context: ${learnedRules.additionalContext}`);
+    }
+    learnedSection = lines.join("\n");
+  }
+
   return `Score each posting for remote medical administrative fit. Apply the system criteria strictly:
 - Hard disqualify: on-site, clinical duties, over-senior management roles, US-only credentials required, non-US hard restriction
 - Deprioritize (score 20-49): confirmed large named hospital networks/academic medical centers only
 - Prioritize: small/mid practices, MSOs, billing companies with EHR tools and remote work
-${feedbackSection}
+${learnedSection}${feedbackSection}
 
 Return JSON: { "results": [{ "postingIndex": number, "job": { "isRelevant": boolean, "score": number (0-100), "roleCategory": string, "fitReason": string (1 sentence), "suggestedRegions": string[] (["Philippines","India","Ethiopia"] for relevant, [] otherwise), "estimatedSalaryRange": string } }] }
 
