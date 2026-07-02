@@ -41,6 +41,16 @@ const RED_FLAG_LEGAL = [
   "fingerprinting in person",
 ];
 
+// Checked against title only — clearly over-senior for a remote international hire.
+// Avoid short substrings that appear inside common words (e.g. "coo" in "coordinator").
+const RED_FLAG_EXEC_TITLES = [
+  "vp of ", "vice president",
+  "chief operating", "chief executive", "chief medical", "chief financial", "chief technology",
+  "svp ", "evp ",
+  "regional director", "director of operations", "department head",
+  "practice administrator", "executive director",
+];
+
 // Applied to company field only — deprioritize (−20 pts), not disqualify
 const RED_FLAG_COMPANY_TYPE = [
   "hospital", "health system", "medical center", "health sciences",
@@ -95,10 +105,14 @@ const MEDICAL_TITLES = [
 const US_SIGNALS = [
   "united states", "usa", "u.s.", "us only", "us-based", "us based",
   "us remote", "north america", "anywhere", "worldwide", "global", "remote",
+  // International-open signals — US companies posting for global remote talent
+  "philippines", "southeast asia", "emea", "international", "africa",
+  "latin america", "ethiopia", "work from anywhere",
 ];
 
 const NON_US_HARD_RESTRICTIONS = [
   "uk only", "canada only", "australia only", "eu only", "europe only",
+  "south africa only", "india only", "nigeria only",
 ];
 
 // ─── Core scoring ───────────────────────────────────────────────────────────
@@ -145,6 +159,9 @@ function applyRuleFilter(posting: {
   });
 
   // Hard disqualifications
+  const execHit = hasAny(titleLower, RED_FLAG_EXEC_TITLES);
+  if (execHit) return disqualify(`Over-senior title: "${execHit}"`, 10);
+
   const onsiteHit = hasAny(allText, RED_FLAG_ONSITE);
   if (onsiteHit) return disqualify(`Red flag (on-site): "${onsiteHit}"`);
 
