@@ -127,6 +127,13 @@ export function LiveStatsSection() {
     return () => clearInterval(id);
   }, [fetchStats]);
 
+  // Refresh immediately when a lead is manually marked from the Lead Status tab
+  useEffect(() => {
+    const handler = () => void fetchStats(true);
+    window.addEventListener("lead-enriched-changed", handler);
+    return () => window.removeEventListener("lead-enriched-changed", handler);
+  }, [fetchStats]);
+
   const windowLabel =
     timeWindow === "24h"
       ? "Last 24 hours"

@@ -33,6 +33,7 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
   const [enrichingAll, setEnrichingAll] = useState(false);
   const [enrichingId, setEnrichingId] = useState<number | null>(null);
   const [markingId, setMarkingId] = useState<number | null>(null);
+  const [localMarked, setLocalMarked] = useState<Set<number>>(new Set());
   const [enrichResult, setEnrichResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -160,14 +161,25 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
   }
 
   async function markManual(postingId: number) {
+    // Optimistic: flip immediately so the UI responds on click
+    setLocalMarked((prev) => { const next = new Set(prev); next.add(postingId); return next; });
     setMarkingId(postingId);
     try {
-      await fetch("/api/jobs/mark-enriched", {
+      const res = await fetch("/api/jobs/mark-enriched", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ postingId }),
       });
-      await fetchData();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      window.dispatchEvent(new CustomEvent("lead-enriched-changed"));
+      void fetchData();
+    } catch {
+      // Roll back on failure
+      setLocalMarked((prev) => {
+        const next = new Set(prev);
+        next.delete(postingId);
+        return next;
+      });
     } finally {
       setMarkingId(null);
     }
@@ -310,27 +322,45 @@ export function LeadStatusTab({ initialAutoEnrich }: Props) {
           </p>
         ) : (
           <div className="space-y-2">
-            {midItems.map((job) => (
-              <LeadJobRow
-                key={job.postingId}
-                job={job}
-                action={
-                  job.isEnriched ? (
-                    <span className="shrink-0 text-xs font-medium text-green-700">
-                      ✓ Enriched
-                    </span>
-                  ) : (
+            {midItems.map((job) => {
+              const enriched = job.isEnriched || localMarked.has(job.postingId);
+              return (
+                <LeadJobRow
+                  key={job.postingId}
+                  job={job}
+                  action={
                     <button
-                      onClick={() => markManual(job.postingId)}
+                      onClick={() => !enriched && markManual(job.postingId)}
                       disabled={markingId === job.postingId}
-                      className="shrink-0 rounded-lg border border-orange-700/40 px-3 py-1 text-xs font-medium text-orange-800 hover:bg-orange-50 disabled:opacity-40"
+                      aria-pressed={enriched}
+                      title={enriched ? "Marked as enriched" : "Mark as enriched"}
+                      className={cn(
+                        "shrink-0 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1 text-xs font-medium transition disabled:opacity-40",
+                        enriched
+                          ? "border-green-600/40 bg-green-50 text-green-700 cursor-default"
+                          : "border-orange-700/40 text-orange-800 hover:bg-orange-50 cursor-pointer"
+                      )}
                     >
-                      {markingId === job.postingId ? "Saving…" : "Mark enriched"}
+                      <span
+                        className={cn(
+                          "inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px]",
+                          enriched
+                            ? "border-green-600 bg-green-600 text-white"
+                            : "border-orange-500 bg-white"
+                        )}
+                      >
+                        {enriched && "✓"}
+                      </span>
+                      {markingId === job.postingId
+                        ? "Saving…"
+                        : enriched
+                          ? "Enriched"
+                          : "Mark enriched"}
                     </button>
-                  )
-                }
-              />
-            ))}
+                  }
+                />
+              );
+            })}
           </div>
         )}
       </section>
