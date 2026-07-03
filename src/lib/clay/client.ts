@@ -1,6 +1,6 @@
 import { env } from "@/lib/env";
 import { sleep, withTimeout } from "@/lib/utils";
-import { callOpenAIJson } from "@/lib/llm/client";
+import { createOpenAIClient } from "@/lib/llm/client";
 
 export interface ClayContact {
   name: string | null;
@@ -70,23 +70,36 @@ function isRelevantLead(title: string | null): boolean {
 
 async function lookupCompanyWebsite(companyName: string): Promise<string | null> {
   try {
-    const result = await callOpenAIJson<{ website: string | null }>({
-      model: env.OPENAI_URL_FILTER_MODEL,
-      system:
-        "You are a company research assistant. Given a company name, return its official website URL. Return null if you are uncertain. Return JSON only.",
-      user: `Find the official website for: ${companyName}`,
-      jsonSchema: {
-        type: "object",
-        properties: { website: { type: ["string", "null"] } },
-        required: ["website"],
-        additionalProperties: false,
-      },
-      timeoutMs: 15_000,
-      maxRetries: 2,
+    const client = createOpenAIClient(15_000);
+    const response = await withTimeout(
+      client.chat.completions.create({
+        model: env.OPENAI_URL_FILTER_MODEL,
+        messages: [
+          { role: "system", content: "You are a company research assistant." },
+          { role: "user", content: `can you find the website of the company called ${companyName}` },
+        ],
+      }),
+      15_000,
+      "lookupCompanyWebsite"
+    );
+
+    const text = response.choices[0]?.message?.content ?? "";
+    // Extract all https URLs from the free-form response
+    const urls = text.match(/https?:\/\/[^\s)\]>"']+/g) ?? [];
+    if (urls.length === 0) return null;
+
+    // Prefer the root domain — pick the URL with the fewest path segments
+    const sorted = [...urls].sort((a, b) => {
+      try {
+        const aSeg = new URL(a).pathname.replace(/\/$/, "").split("/").filter(Boolean).length;
+        const bSeg = new URL(b).pathname.replace(/\/$/, "").split("/").filter(Boolean).length;
+        return aSeg - bSeg;
+      } catch {
+        return 0;
+      }
     });
-    if (!result?.website) return null;
-    const raw = result.website.startsWith("http") ? result.website : `https://${result.website}`;
-    return extractDomain(raw);
+
+    return extractDomain(sorted[0]);
   } catch {
     return null;
   }
@@ -247,11 +260,11 @@ export async function enrichCompanyWithClay(params: {
   const domain = companyDomain ?? extractDomain(params.jobUrl);
 
   // Run people search and company enrichment in parallel
+  // company_domain is Clay's confirmed field for identifying a company by website
   const [leadsData, companyData] = await Promise.allSettled([
     clayPost(PEOPLE_SEARCH_ENDPOINT, apiKey, {
       company: params.company,
-      job_url: params.jobUrl,
-      ...(domain ? { domain } : {}),
+      ...(domain ? { company_domain: domain } : {}),
     }),
     clayPost(COMPANY_ENRICH_ENDPOINT, apiKey, {
       company_name: params.company,
