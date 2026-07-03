@@ -2,6 +2,7 @@ import Link from "next/link";
 import { JobsTable, type JobRow } from "@/components/jobs/jobs-table";
 import { FeedbackTab, type FeedbackEntry } from "@/components/jobs/feedback-tab";
 import { LeadStatusTab } from "@/components/jobs/lead-status-tab";
+import { EnrichmentTab } from "@/components/jobs/enrichment-tab";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
 import { listJobsPaginated, listAllFeedback, getSetting } from "@/lib/db/queries";
 import { jobSourceLabel } from "@/lib/job-sources";
@@ -18,6 +19,7 @@ const TABS: Array<{ key: string; label: string; status?: string }> = [
   { key: "relevant", label: "Relevant", status: "relevant" },
   { key: "unfiltered", label: "Unfiltered", status: "unfiltered" },
   { key: "lead-status", label: "Lead Status", status: "lead-status" },
+  { key: "enrichment", label: "Enrichment", status: "enrichment" },
   { key: "feedback", label: "Feedback", status: "feedback" },
 ];
 
@@ -35,26 +37,22 @@ export const dynamic = "force-dynamic";
 export default async function JobsPage({
   searchParams,
 }: {
-  searchParams?: { status?: string; window?: string; page?: string };
+  searchParams?: { status?: string; window?: string; page?: string; job?: string };
 }) {
   const activeStatus = searchParams?.status ?? "all";
   const activeWindow = searchParams?.window ?? "7d";
   const currentPage = Math.max(1, Number(searchParams?.page ?? 1));
   const timeWindow = activeWindow === "all" ? undefined : activeWindow;
+  const jobId = searchParams?.job;
 
   let jobs: JobRow[] = [];
   let feedbackEntries: FeedbackEntry[] = [];
   let lastTrainedAt: string | null = null;
-  let clayAutoEnrich = false;
   let error: string | null = null;
   let total = 0;
 
-  if (activeStatus === "lead-status") {
-    try {
-      clayAutoEnrich = (await getSetting("clay_auto_enrich_enabled")) === "true";
-    } catch {
-      // non-fatal — component defaults to false
-    }
+  if (activeStatus === "lead-status" || activeStatus === "enrichment") {
+    // All data fetched client-side in LeadStatusTab / EnrichmentTab
   } else if (activeStatus === "feedback") {
     try {
       const [rawEntries, learnedRulesStr] = await Promise.all([
@@ -178,15 +176,14 @@ export default async function JobsPage({
       {!error && activeStatus === "feedback" && (
         <FeedbackTab entries={feedbackEntries} lastTrainedAt={lastTrainedAt} />
       )}
-      {!error && activeStatus === "lead-status" && (
-        <LeadStatusTab initialAutoEnrich={clayAutoEnrich} />
-      )}
-      {!error && activeStatus !== "feedback" && activeStatus !== "lead-status" && (
+      {!error && activeStatus === "lead-status" && <LeadStatusTab />}
+      {!error && activeStatus === "enrichment" && <EnrichmentTab initialJobId={jobId} />}
+      {!error && activeStatus !== "feedback" && activeStatus !== "lead-status" && activeStatus !== "enrichment" && (
         <JobsTable jobs={jobs} />
       )}
 
       {/* Pagination */}
-      {activeStatus !== "feedback" && activeStatus !== "lead-status" && totalPages > 1 && (
+      {activeStatus !== "feedback" && activeStatus !== "lead-status" && activeStatus !== "enrichment" && totalPages > 1 && (
         <div className="flex items-center justify-center gap-1 pt-2">
           {currentPage > 1 && (
             <Link

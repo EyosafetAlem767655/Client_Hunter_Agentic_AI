@@ -99,6 +99,7 @@ const envSchema = z.object({
   LANGSEARCH_API_KEY: z.string().min(1).optional(),
   REED_API_KEY: z.string().min(1).optional(),
   CLAY_API_KEY: z.string().min(1).optional(),
+  CLAY_WEBHOOK_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

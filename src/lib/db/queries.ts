@@ -30,6 +30,7 @@ import { getDb } from "./index";
 import {
   agentEvents,
   agentRuns,
+  companyEnrichments,
   contacts,
   filteredJobs,
   jobPostings,
@@ -621,11 +622,11 @@ export async function getDashboardStats(timeWindow = "7d") {
 
   const [enriched] = await db
     .select({ total: count() })
-    .from(filteredJobs)
-    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
+    .from(companyEnrichments)
+    .innerJoin(jobPostings, eq(jobPostings.id, companyEnrichments.postingId))
     .where(
       and(
-        eq(filteredJobs.manuallyEnriched, true),
+        eq(companyEnrichments.status, "complete"),
         visiblePostingSource()
       )
     );
@@ -1190,4 +1191,235 @@ export async function saveClayContacts(
     saved++;
   }
   return saved;
+}
+
+// ── Lead Status / Enrichment queries (redesigned) ─────────────────────────
+
+export async function listEligibleLeadJobs(params: {
+  page?: number;
+  pageSize?: number;
+}): Promise<{
+  items: Array<{
+    postingId: number;
+    title: string;
+    company: string;
+    url: string;
+    score: number;
+    isEnriched: boolean;
+  }>;
+  total: number;
+}> {
+  const db = getDb();
+  const page = params.page ?? 1;
+  const pageSize = params.pageSize ?? 100;
+  const offset = (page - 1) * pageSize;
+
+  const where = and(
+    eq(filteredJobs.isRelevant, true),
+    gte(filteredJobs.score, 60),
+    visiblePostingSource()
+  );
+
+  const rows = await db
+    .select({
+      postingId: jobPostings.id,
+      title: jobPostings.title,
+      company: jobPostings.company,
+      url: jobPostings.url,
+      score: filteredJobs.score,
+      enrichmentStatus: companyEnrichments.status,
+    })
+    .from(filteredJobs)
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
+    .leftJoin(companyEnrichments, eq(companyEnrichments.postingId, jobPostings.id))
+    .where(where)
+    .orderBy(desc(filteredJobs.score))
+    .limit(pageSize)
+    .offset(offset);
+
+  const [totalRow] = await db
+    .select({ total: count() })
+    .from(filteredJobs)
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
+    .where(where);
+
+  return {
+    items: rows.map((r) => ({
+      postingId: r.postingId,
+      title: r.title,
+      company: r.company,
+      url: r.url,
+      score: r.score,
+      isEnriched: r.enrichmentStatus === "complete",
+    })),
+    total: totalRow?.total ?? 0,
+  };
+}
+
+export async function saveCompanyEnrichment(
+  postingId: number,
+  data: {
+    companyName: string | null;
+    location: string | null;
+    website: string | null;
+    staffCount: number | null;
+    annualRevenue: string | null;
+    facilitiesCount: number | null;
+    rawData?: Record<string, unknown>;
+  }
+): Promise<void> {
+  const db = getDb();
+
+  const practiceSize =
+    data.staffCount !== null
+      ? data.staffCount <= 5
+        ? "solo"
+        : data.staffCount <= 25
+          ? "mid"
+          : null
+      : null;
+
+  await db
+    .insert(companyEnrichments)
+    .values({
+      postingId,
+      status: "complete",
+      companyName: data.companyName,
+      location: data.location,
+      website: data.website,
+      staffCount: data.staffCount,
+      annualRevenue: data.annualRevenue,
+      facilitiesCount: data.facilitiesCount,
+      practiceSize,
+      rawData: data.rawData,
+    })
+    .onConflictDoUpdate({
+      target: companyEnrichments.postingId,
+      set: {
+        status: "complete",
+        companyName: data.companyName,
+        location: data.location,
+        website: data.website,
+        staffCount: data.staffCount,
+        annualRevenue: data.annualRevenue,
+        facilitiesCount: data.facilitiesCount,
+        practiceSize,
+        rawData: data.rawData,
+        updatedAt: new Date(),
+      },
+    });
+}
+
+export async function saveEnrichedContacts(
+  postingId: number,
+  leads: Array<{
+    name: string | null;
+    title: string | null;
+    email: string | null;
+    phone: string | null;
+    linkedinUrl: string | null;
+  }>
+): Promise<number> {
+  const db = getDb();
+  let saved = 0;
+  for (const lead of leads) {
+    if (!lead.email && !lead.linkedinUrl) continue;
+    await db
+      .insert(contacts)
+      .values({
+        postingId,
+        email: lead.email ? lead.email.toLowerCase().trim() : null,
+        contactUrl: lead.linkedinUrl ?? null,
+        name: lead.name,
+        title: lead.title,
+        phone: lead.phone,
+        sourceType: "clay_enriched",
+        confidence: "0.85",
+      })
+      .onConflictDoNothing();
+    saved++;
+  }
+  return saved;
+}
+
+export async function getEnrichmentDetail(postingId: number): Promise<{
+  enrichment: typeof companyEnrichments.$inferSelect | null;
+  leads: Array<typeof contacts.$inferSelect>;
+}> {
+  const db = getDb();
+
+  const [enrichment] = await db
+    .select()
+    .from(companyEnrichments)
+    .where(eq(companyEnrichments.postingId, postingId))
+    .limit(1);
+
+  const leads = await db
+    .select()
+    .from(contacts)
+    .where(
+      and(
+        eq(contacts.postingId, postingId),
+        eq(contacts.sourceType, "clay_enriched")
+      )
+    );
+
+  return { enrichment: enrichment ?? null, leads };
+}
+
+export async function listEnrichedJobs(params: {
+  page?: number;
+  pageSize?: number;
+}): Promise<{
+  items: Array<{
+    postingId: number;
+    title: string;
+    company: string;
+    url: string;
+    score: number;
+    enrichment: typeof companyEnrichments.$inferSelect;
+    enrichedAt: Date;
+  }>;
+  total: number;
+}> {
+  const db = getDb();
+  const page = params.page ?? 1;
+  const pageSize = params.pageSize ?? 100;
+  const offset = (page - 1) * pageSize;
+
+  const where = and(
+    eq(companyEnrichments.status, "complete"),
+    visiblePostingSource()
+  );
+
+  const rows = await db
+    .select({
+      postingId: jobPostings.id,
+      title: jobPostings.title,
+      company: jobPostings.company,
+      url: jobPostings.url,
+      score: filteredJobs.score,
+      enrichment: companyEnrichments,
+    })
+    .from(companyEnrichments)
+    .innerJoin(jobPostings, eq(jobPostings.id, companyEnrichments.postingId))
+    .innerJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
+    .where(where)
+    .orderBy(desc(companyEnrichments.updatedAt))
+    .limit(pageSize)
+    .offset(offset);
+
+  const [totalRow] = await db
+    .select({ total: count() })
+    .from(companyEnrichments)
+    .innerJoin(jobPostings, eq(jobPostings.id, companyEnrichments.postingId))
+    .where(where);
+
+  return {
+    items: rows.map((r) => ({
+      ...r,
+      enrichedAt: r.enrichment.updatedAt,
+    })),
+    total: totalRow?.total ?? 0,
+  };
 }

@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { verifyAdminAuth } from "@/lib/auth";
 import { enrichCompanyWithClay, isClayConfigured } from "@/lib/clay/client";
-import { listLeadStatusJobs, saveClayContacts, getSetting } from "@/lib/db/queries";
+import { listEligibleLeadJobs, saveCompanyEnrichment, saveEnrichedContacts } from "@/lib/db/queries";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const bodySchema = z.object({
-  postingId: z.number().int().positive().optional(),
+  postingId: z.number().int().positive(),
 });
 
 export async function POST(request: NextRequest) {
@@ -28,65 +28,38 @@ export async function POST(request: NextRequest) {
   try {
     body = bodySchema.parse(await request.json());
   } catch {
-    return NextResponse.json({ ok: false, error: "Invalid body" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "postingId is required" }, { status: 400 });
   }
 
   try {
-    if (body.postingId !== undefined) {
-      // Single-job enrichment
-      const { items } = await listLeadStatusJobs({ tier: "high", page: 1, pageSize: 200 });
-      const job = items.find((j) => j.posting.id === body.postingId);
-      if (!job) {
-        return NextResponse.json(
-          { ok: false, error: "Job not found or not in high-tier" },
-          { status: 404 }
-        );
-      }
-      const contacts = await enrichCompanyWithClay({
-        company: job.posting.company,
-        jobTitle: job.posting.title,
-        jobUrl: job.posting.url,
-      });
-      const contactsSaved = await saveClayContacts(body.postingId, contacts);
-      return NextResponse.json({ ok: true, postingId: body.postingId, contactsSaved });
-    }
-
-    // Batch mode — auto-enrich pending high-tier jobs (cap at 3 for Vercel 60s limit)
-    const autoMode = (await getSetting("clay_auto_enrich_enabled")) === "true";
-    if (!autoMode) {
+    const { items } = await listEligibleLeadJobs({ page: 1, pageSize: 500 });
+    const job = items.find((j) => j.postingId === body.postingId);
+    if (!job) {
       return NextResponse.json(
-        { ok: false, error: "Auto-enrich is disabled. Toggle AUTO mode first." },
-        { status: 400 }
+        { ok: false, error: "Job not found or score below 60" },
+        { status: 404 }
       );
     }
 
-    const { items } = await listLeadStatusJobs({ tier: "high", page: 1, pageSize: 200 });
-    const pending = items.filter((j) => !j.isEnriched).slice(0, 3);
-
-    let totalSaved = 0;
-    const errors: string[] = [];
-
-    for (const job of pending) {
-      try {
-        const clayContacts = await enrichCompanyWithClay({
-          company: job.posting.company,
-          jobTitle: job.posting.title,
-          jobUrl: job.posting.url,
-        });
-        totalSaved += await saveClayContacts(job.posting.id, clayContacts);
-      } catch (e) {
-        errors.push(
-          `${job.posting.company}: ${e instanceof Error ? e.message : String(e)}`
-        );
-      }
-    }
-
-    return NextResponse.json({
-      ok: true,
-      enriched: pending.length,
-      contactsSaved: totalSaved,
-      errors: errors.length > 0 ? errors : undefined,
+    const result = await enrichCompanyWithClay({
+      company: job.company,
+      jobTitle: job.title,
+      jobUrl: job.url,
     });
+
+    await saveCompanyEnrichment(body.postingId, {
+      companyName: result.company.name ?? job.company,
+      location: result.company.location,
+      website: result.company.website,
+      staffCount: result.company.staffCount,
+      annualRevenue: result.company.annualRevenue,
+      facilitiesCount: result.company.facilitiesCount,
+      rawData: { company: result.company, leads: result.leads },
+    });
+
+    const contactsSaved = await saveEnrichedContacts(body.postingId, result.leads);
+
+    return NextResponse.json({ ok: true, postingId: body.postingId, contactsSaved });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "Enrichment failed" },

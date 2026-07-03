@@ -69,6 +69,9 @@ export const contacts = pgTable(
       .notNull(),
     email: text("email"),
     contactUrl: text("contact_url"),
+    name: text("name"),
+    title: text("title"),
+    phone: text("phone"),
     sourceType: text("source_type").notNull(),
     confidence: numeric("confidence", { precision: 3, scale: 2 }).notNull(),
     verified: boolean("verified").default(false).notNull(),
@@ -153,3 +156,25 @@ export const settings = pgTable("settings", {
   value: text("value").notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+export const companyEnrichments = pgTable(
+  "company_enrichments",
+  {
+    id: serial("id").primaryKey(),
+    postingId: integer("posting_id")
+      .references(() => jobPostings.id)
+      .notNull(),
+    status: text("status").notNull().default("complete"),
+    companyName: text("company_name"),
+    location: text("location"),
+    website: text("website"),
+    facilitiesCount: integer("facilities_count"),
+    staffCount: integer("staff_count"),
+    annualRevenue: text("annual_revenue"),
+    practiceSize: text("practice_size"),
+    rawData: jsonb("raw_data").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("ce_posting_id_idx").on(t.postingId)]
+);
