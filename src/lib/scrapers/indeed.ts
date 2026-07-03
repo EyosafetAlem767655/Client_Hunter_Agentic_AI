@@ -1,25 +1,46 @@
 import * as cheerio from "cheerio";
 import type { RawPosting } from "@/types";
+import { sleep } from "@/lib/utils";
 import { BaseScraper } from "./base";
 import { absoluteUrl, dedupePostings } from "./html-card";
 import { MEDICAL_VA_TITLES } from "./job-titles";
 
 const SEARCH_QUERIES = MEDICAL_VA_TITLES.map((t) => t.replace(/ /g, "+"));
 
+// Param that signals this is a real desktop search — helps bypass bot checks
+const FROM_PARAM =
+  "searchOnDesktopSerp%2Cwhatautocomplete%2CwhatautocompleteSourceStandard";
+
 export class IndeedScraper extends BaseScraper {
   constructor(contactEmail: string) {
     super("indeed", contactEmail);
-    this.acceptHeader = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
+    this.acceptHeader =
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8";
   }
 
   async fetch(limit: number): Promise<RawPosting[]> {
     const out: RawPosting[] = [];
     for (const query of SEARCH_QUERIES) {
       if (out.length >= limit) break;
-      const url = `https://www.indeed.com/jobs?q=${query}&l=Remote&sort=date&fromage=7&sc=0kf%3Aattr%28DSQF7%29%3B`;
+      const url =
+        `https://www.indeed.com/jobs?q=${query}&l=USA&from=${FROM_PARAM}&sort=date&fromage=7`;
       const parsed = new URL(url);
       if (!(await this.respectRobots(parsed.origin, parsed.pathname + parsed.search))) continue;
-      const response = await this.fetchWithRetry(url);
+
+      // Wait 5 seconds before each Indeed request — gives the page time to settle
+      // and avoids the bot-check 5xx that triggers on rapid automated requests
+      await sleep(5_000);
+
+      const response = await this.fetchWithRetry(url, {
+        headers: {
+          Referer: "https://www.indeed.com/",
+          "Upgrade-Insecure-Requests": "1",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "same-origin",
+          "Sec-Fetch-User": "?1",
+        },
+      });
       const html = await response.text();
       // Try structured JSON-LD first, then fall back to card parsing
       out.push(...this.parseJsonLdPostings(html, url), ...this.parseCards(html, url));
