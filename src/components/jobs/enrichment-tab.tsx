@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PRACTICE_TITLES: Record<"solo" | "mid", string[]> = {
@@ -198,8 +199,13 @@ export function EnrichmentTab({ initialJobId }: Props) {
                 {/* Row header */}
                 <button
                   onClick={() => toggleExpand(job.postingId)}
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-emerald-50/50"
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-emerald-50/50"
                 >
+                  <span className="flex-shrink-0 rounded-md bg-emerald-100 p-1">
+                    {isExpanded
+                      ? <ChevronUp className="h-4 w-4 text-emerald-700" />
+                      : <ChevronDown className="h-4 w-4 text-emerald-700" />}
+                  </span>
                   <div className="min-w-0 flex-1">
                     <a
                       href={job.url}
@@ -227,9 +233,6 @@ export function EnrichmentTab({ initialJobId }: Props) {
                       )}
                     >
                       {job.score}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {isExpanded ? "▲" : "▼"}
                     </span>
                   </div>
                 </button>

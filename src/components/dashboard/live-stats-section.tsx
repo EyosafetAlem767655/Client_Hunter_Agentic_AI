@@ -44,11 +44,11 @@ const META = [
   {
     key: "leadsEnriched" as const,
     label: "Leads Enriched",
-    hint: "Clay & manual",
+    hint: "Enriched companies",
     icon: UserSearch,
     grad: "from-yellow-200/70 via-yellow-100/40 to-transparent",
     ring: "ring-yellow-700/30",
-    href: () => `/jobs?status=lead-status`,
+    href: () => `/jobs?status=enrichment`,
   },
   {
     key: "drafted" as const,

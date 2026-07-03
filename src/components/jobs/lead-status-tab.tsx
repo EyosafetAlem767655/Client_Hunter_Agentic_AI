@@ -33,7 +33,7 @@ export function LeadStatusTab() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [enrichingId, setEnrichingId] = useState<number | null>(null);
-  const [enrichResult, setEnrichResult] = useState<string | null>(null);
+  const [enrichResults, setEnrichResults] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -64,11 +64,11 @@ export function LeadStatusTab() {
   async function enrichOne(postingId: number) {
     const token = getToken();
     if (!token) {
-      setEnrichResult("Paste your ADMIN_TOKEN in Settings first.");
+      setEnrichResults((prev) => ({ ...prev, [postingId]: "Paste your ADMIN_TOKEN in Settings first." }));
       return;
     }
     setEnrichingId(postingId);
-    setEnrichResult(null);
+    setEnrichResults((prev) => { const n = { ...prev }; delete n[postingId]; return n; });
     try {
       const res = await fetch("/api/admin/enrich", {
         method: "POST",
@@ -84,14 +84,14 @@ export function LeadStatusTab() {
         error?: string;
       };
       if (json.ok) {
-        setEnrichResult(`Enriched · ${json.contactsSaved ?? 0} contact(s) saved`);
+        setEnrichResults((prev) => ({ ...prev, [postingId]: `✓ ${json.contactsSaved ?? 0} contact(s)` }));
         broadcastEnrichChange();
         await fetchData();
       } else {
-        setEnrichResult(`Error: ${json.error ?? "Unknown"}`);
+        setEnrichResults((prev) => ({ ...prev, [postingId]: `Error: ${json.error ?? "Unknown"}` }));
       }
     } catch (e) {
-      setEnrichResult(`Network error: ${e instanceof Error ? e.message : String(e)}`);
+      setEnrichResults((prev) => ({ ...prev, [postingId]: `Network error: ${e instanceof Error ? e.message : String(e)}` }));
     } finally {
       setEnrichingId(null);
     }
@@ -123,12 +123,6 @@ export function LeadStatusTab() {
           </p>
         </div>
       </div>
-
-      {enrichResult && (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {enrichResult}
-        </p>
-      )}
 
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
@@ -168,6 +162,16 @@ export function LeadStatusTab() {
                 >
                   {job.score}
                 </span>
+                {enrichResults[job.postingId] && (
+                  <span className={cn(
+                    "text-xs",
+                    enrichResults[job.postingId].startsWith("Error") || enrichResults[job.postingId].startsWith("Network")
+                      ? "text-red-600"
+                      : "text-green-700"
+                  )}>
+                    {enrichResults[job.postingId]}
+                  </span>
+                )}
                 {job.isEnriched ? (
                   <button
                     onClick={() => viewDetails(job.postingId)}
