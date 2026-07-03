@@ -79,6 +79,8 @@ export function EnrichmentTab({ initialJobId }: Props) {
   );
   const [detailCache, setDetailCache] = useState<Map<number, EnrichmentDetail>>(new Map());
   const [loadingDetail, setLoadingDetail] = useState<number | null>(null);
+  const [pushResults, setPushResults] = useState<Record<number, string>>({});
+  const [pushingId, setPushingId] = useState<number | null>(null);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -136,6 +138,63 @@ export function EnrichmentTab({ initialJobId }: Props) {
     }
   }, [initialJobId, jobs]);
 
+  function exportCsv() {
+    const header = [
+      "Company", "Job Title", "Location", "Website", "Staff", "Revenue",
+      "Practice Size", "Facilities", "Contact Name", "Title", "Email", "Phone", "LinkedIn",
+    ];
+    const rows: string[][] = [header];
+    for (const job of jobs) {
+      const detail = detailCache.get(job.postingId);
+      const e = detail?.enrichment;
+      const baseRow = [
+        job.company, job.title,
+        e?.location ?? "", e?.website ?? "",
+        e?.staffCount != null ? String(e.staffCount) : "",
+        e?.annualRevenue ?? "",
+        e?.practiceSize ?? "",
+        e?.facilitiesCount != null ? String(e.facilitiesCount) : "",
+      ];
+      if (!detail?.leads.length) {
+        rows.push([...baseRow, "", "", "", "", ""]);
+      } else {
+        for (const l of detail.leads) {
+          rows.push([...baseRow, l.name ?? "", l.title ?? "", l.email ?? "", l.phone ?? "", l.contactUrl ?? ""]);
+        }
+      }
+    }
+    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
+    a.download = `enrichment-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  }
+
+  async function pushToCrm(postingId: number) {
+    setPushingId(postingId);
+    setPushResults((prev) => ({ ...prev, [postingId]: "Pushing…" }));
+    try {
+      const res = await fetch("/api/crm/close/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ postingId }),
+      });
+      const json = await res.json() as { ok?: boolean; leadId?: string; contactsCreated?: number; error?: string };
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      setPushResults((prev) => ({
+        ...prev,
+        [postingId]: `✓ Pushed to CRM · ${json.contactsCreated ?? 0} contact(s) · ID: ${json.leadId ?? ""}`,
+      }));
+    } catch (e) {
+      setPushResults((prev) => ({
+        ...prev,
+        [postingId]: `Error: ${e instanceof Error ? e.message : "Push failed"}`,
+      }));
+    } finally {
+      setPushingId(null);
+    }
+  }
+
   async function toggleExpand(postingId: number) {
     if (expandedId === postingId) {
       setExpandedId(null);
@@ -177,6 +236,14 @@ export function EnrichmentTab({ initialJobId }: Props) {
             Click a row to expand company data, targeted job titles, and lead contacts.
           </p>
         </div>
+        {jobs.length > 0 && (
+          <button
+            onClick={exportCsv}
+            className="shrink-0 rounded-lg border border-emerald-300/60 bg-white/70 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-50 transition"
+          >
+            ↓ Export CSV
+          </button>
+        )}
       </div>
 
       {jobs.length === 0 ? (
@@ -244,6 +311,25 @@ export function EnrichmentTab({ initialJobId }: Props) {
                       <p className="text-sm text-muted-foreground">Loading details…</p>
                     ) : detail ? (
                       <>
+                        {/* Push to CRM row */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            onClick={() => pushToCrm(job.postingId)}
+                            disabled={pushingId === job.postingId}
+                            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition"
+                          >
+                            {pushingId === job.postingId ? "Pushing…" : "Push to CRM ↗"}
+                          </button>
+                          {pushResults[job.postingId] && (
+                            <span className={cn("text-xs",
+                              pushResults[job.postingId].startsWith("Error")
+                                ? "text-red-600" : "text-blue-700"
+                            )}>
+                              {pushResults[job.postingId]}
+                            </span>
+                          )}
+                        </div>
+
                         {/* Company Enrichment */}
                         <section>
                           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">

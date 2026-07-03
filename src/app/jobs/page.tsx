@@ -3,6 +3,7 @@ import { JobsTable, type JobRow } from "@/components/jobs/jobs-table";
 import { FeedbackTab, type FeedbackEntry } from "@/components/jobs/feedback-tab";
 import { LeadStatusTab } from "@/components/jobs/lead-status-tab";
 import { EnrichmentTab } from "@/components/jobs/enrichment-tab";
+import { CloseCrmTab } from "@/components/jobs/close-crm-tab";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
 import { listJobsPaginated, listAllFeedback, getSetting } from "@/lib/db/queries";
 import { jobSourceLabel } from "@/lib/job-sources";
@@ -20,6 +21,7 @@ const TABS: Array<{ key: string; label: string; status?: string }> = [
   { key: "unfiltered", label: "Unfiltered", status: "unfiltered" },
   { key: "lead-status", label: "Lead Status", status: "lead-status" },
   { key: "enrichment", label: "Enrichment", status: "enrichment" },
+  { key: "crm", label: "Close CRM", status: "crm" },
   { key: "feedback", label: "Feedback", status: "feedback" },
 ];
 
@@ -51,8 +53,8 @@ export default async function JobsPage({
   let error: string | null = null;
   let total = 0;
 
-  if (activeStatus === "lead-status" || activeStatus === "enrichment") {
-    // All data fetched client-side in LeadStatusTab / EnrichmentTab
+  if (activeStatus === "lead-status" || activeStatus === "enrichment" || activeStatus === "crm") {
+    // All data fetched client-side in LeadStatusTab / EnrichmentTab / CloseCrmTab
   } else if (activeStatus === "feedback") {
     try {
       const [rawEntries, learnedRulesStr] = await Promise.all([
@@ -178,12 +180,13 @@ export default async function JobsPage({
       )}
       {!error && activeStatus === "lead-status" && <LeadStatusTab />}
       {!error && activeStatus === "enrichment" && <EnrichmentTab initialJobId={jobId} />}
-      {!error && activeStatus !== "feedback" && activeStatus !== "lead-status" && activeStatus !== "enrichment" && (
+      {!error && activeStatus === "crm" && <CloseCrmTab />}
+      {!error && activeStatus !== "feedback" && activeStatus !== "lead-status" && activeStatus !== "enrichment" && activeStatus !== "crm" && (
         <JobsTable jobs={jobs} />
       )}
 
       {/* Pagination */}
-      {activeStatus !== "feedback" && activeStatus !== "lead-status" && activeStatus !== "enrichment" && totalPages > 1 && (
+      {activeStatus !== "feedback" && activeStatus !== "lead-status" && activeStatus !== "enrichment" && activeStatus !== "crm" && totalPages > 1 && (
         <div className="flex items-center justify-center gap-1 pt-2">
           {currentPage > 1 && (
             <Link
