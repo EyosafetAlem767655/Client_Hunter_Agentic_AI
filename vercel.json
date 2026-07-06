@@ -11,9 +11,6 @@
     }
   },
   "crons": [
-    { "path": "/api/cron/cleanup", "schedule": "0 5 * * *" },
-    { "path": "/api/cron/scrape",  "schedule": "0 6 * * *" },
-    { "path": "/api/cron/train",   "schedule": "0 7 * * *" },
-    { "path": "/api/cron/outreach","schedule": "0 8 * * *" }
+    { "path": "/api/cron/scrape", "schedule": "0 6 * * *" }
   ]
 }

@@ -177,7 +177,7 @@ describe("requested job-board scrapers", () => {
 
     await runNodeScrapers(150);
 
-    expect(fetchWithinBudget).toHaveBeenCalledWith(40, 120_000);
+    expect(fetchWithinBudget).toHaveBeenCalledWith(40, 8_000);
     vi.unstubAllEnvs();
   });
 

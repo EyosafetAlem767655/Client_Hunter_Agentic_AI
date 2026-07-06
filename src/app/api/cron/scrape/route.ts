@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { runScrapePipeline } from "@/lib/agent/orchestrator";
 import { verifyCronAuth } from "@/lib/auth";
 
-export const maxDuration = 300;
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 

@@ -84,7 +84,7 @@ function perSourceLimit(limit: number, sourceCount: number): number {
 function perSourceTimeoutMs(): number {
   const configured = Number(process.env.SCRAPER_SOURCE_TIMEOUT_MS);
   if (Number.isFinite(configured) && configured > 0) return configured;
-  return process.env.VERCEL === "1" ? 120_000 : 15_000;
+  return process.env.VERCEL === "1" ? 8_000 : 15_000;
 }
 
 function sourceConcurrency(sourceCount: number): number {
