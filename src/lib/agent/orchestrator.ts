@@ -95,12 +95,11 @@ export async function runScrapePipelineFromPostings(
     processed += perception.scraped;
     succeeded += perception.inserted;
 
-    // Time-aware budget. Vercel Hobby caps each function at 60 s, so we
-    // hard-stop the pipeline at ~55 s of wall-time to give the response
-    // a chance to come back. Per-phase guards skip work that almost
-    // certainly won't finish, instead of running into the ceiling and
-    // returning HTTP 504 with nothing persisted.
-    const deadlineMs = start + 55_000;
+    // Time-aware budget. Vercel Pro allows up to 300 s for cron functions.
+    // We stop at 270 s to leave 30 s for LLM filtering + response serialization.
+    // With only LinkedIn and Indeed enabled, each scraper runs concurrently
+    // and has ~120 s before the pipeline moves on.
+    const deadlineMs = start + 270_000;
     const timeLeft = () => deadlineMs - Date.now();
 
     const shouldFilter = options.filterLimit !== 0;

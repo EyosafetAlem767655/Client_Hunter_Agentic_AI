@@ -46,6 +46,29 @@ export class IndeedScraper extends BaseScraper {
       out.push(...this.parseJsonLdPostings(html, url), ...this.parseCards(html, url));
       await this.paginatedJitter();
     }
+    // ── Second round: "virtual assistant" USA remote (10 s cool-down) ──
+    if (out.length < limit) {
+      await sleep(10_000);
+      const vaUrl = `https://www.indeed.com/jobs?q=virtual+assistant&l=USA&from=${FROM_PARAM}&sort=date&fromage=7`;
+      const parsed = new URL(vaUrl);
+      if (await this.respectRobots(parsed.origin, parsed.pathname + parsed.search)) {
+        await sleep(5_000);
+        const response = await this.fetchWithRetry(vaUrl, {
+          headers: {
+            Referer: "https://www.indeed.com/",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+          },
+        });
+        const html = await response.text();
+        out.push(...this.parseJsonLdPostings(html, vaUrl), ...this.parseCards(html, vaUrl));
+        await this.paginatedJitter();
+      }
+    }
+
     return dedupePostings(out).slice(0, limit);
   }
 

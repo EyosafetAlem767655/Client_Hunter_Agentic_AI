@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import type { RawPosting } from "@/types";
+import { sleep } from "@/lib/utils";
 import { BaseScraper } from "./base";
 import { MEDICAL_VA_TITLES } from "./job-titles";
 
@@ -79,6 +80,50 @@ export class LinkedInScraper extends BaseScraper {
             break;
           }
         }
+      }
+    }
+
+    // ── Second round: "virtual assistant" USA remote (10 s cool-down) ──
+    if (all.length < limit) {
+      await sleep(10_000);
+      const vaEncoded = encodeURIComponent("virtual assistant");
+      for (const start of [0, 10, 20]) {
+        if (all.length >= limit) break;
+        try {
+          const url =
+            `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search` +
+            `?keywords=${vaEncoded}&location=United+States&f_WT=2&f_TPR=r604800&start=${start}`;
+          const res = await this.fetchWithRetry(url);
+          const html = await res.text();
+          const $ = cheerio.load(html);
+          let pageCount = 0;
+          $("li").each((_, el) => {
+            if (all.length >= limit) return false;
+            const li = $(el);
+            const link = li.find("a.base-card__full-link").first();
+            const href = (link.attr("href") ?? "").split("?")[0].trim();
+            if (!href || !href.includes("linkedin.com/jobs/view/")) return;
+            if (seen.has(href)) return;
+            seen.add(href);
+            const title = li.find("h3.base-search-card__title").first().text().trim();
+            const company = li.find("h4.base-search-card__subtitle").first().text().trim();
+            const location = li.find(".job-search-card__location").first().text().trim();
+            if (!title) return;
+            pageCount++;
+            all.push({
+              source: "linkedin",
+              externalId: this.hashId(href),
+              url: href,
+              title,
+              company: company || "Unknown",
+              location: location || "Remote",
+              description: `${title} at ${company || "Unknown"}`,
+              postedAt: null,
+              raw: { title, company, location },
+            });
+          });
+          if (pageCount < 10) break;
+        } catch { break; }
       }
     }
 

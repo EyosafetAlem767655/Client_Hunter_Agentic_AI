@@ -28,12 +28,8 @@ export const ENABLED_SOURCES: JobSource[] = [
 export function getEnabledScrapers(): BaseScraper[] {
   const contact = env.CONTACT_EMAIL;
   return [
-    new RemotiveScraper(contact),
-    new JobicyScraper(contact),
-    new WwrDomScraper(contact),
     new LinkedInScraper(contact),
     new IndeedScraper(contact),
-    new HnHiringScraper(contact),
   ];
 }
 

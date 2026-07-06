@@ -43,11 +43,14 @@ Clinical hands-on duties:
 - "CNA required", "BLS certified", "CPR certified", "scrubs required"
 - "MA duties" combined with any clinical task above
 
-Over-senior / management roles (score 0-15, isRelevant: false):
-- Titles with "director", "VP", "vice president", "chief", "head of", "senior manager", "department head", "operations manager" combined with team oversight signals ("direct reports", "supervise staff", "manage a team", "leadership role", "5+ years managing")
-- Always out regardless of other signals: "Regional Director", "Director of Operations", "VP of Revenue Cycle", "Practice Administrator" (multi-site), "Chief Medical Officer"
-- "Team lead" or "lead" in title — disqualify ONLY when managing staff; a "lead receptionist" handling scheduling is acceptable
-- NOTE: "Office manager" at a solo/small group practice is acceptable IF no staff management is required AND experience < 5 years
+Over-senior / leadership / management roles (score 0-15, isRelevant: false):
+ANY role that involves managing, supervising, or leading other staff is a hard disqualifier. This includes:
+- Titles with "director", "VP", "vice president", "chief", "head of", "manager", "supervisor", "lead", "team lead" WHEN combined with staff oversight signals ("direct reports", "supervise staff", "manage a team", "oversee team", "leadership role", "people management", "manage employees")
+- Always disqualify regardless of other signals: "Regional Director", "Director of Operations", "VP of Revenue Cycle", "Practice Administrator" (multi-site), "Chief Medical Officer", "Operations Manager", "Department Head", "Senior Manager"
+- Any posting that lists "leadership", "management experience required", "manage a team", "oversee staff", or "supervise" as a duty or requirement
+- "Team lead" or "lead" in title — disqualify when the role involves managing or directing other employees
+- NOTE: A "lead receptionist" or "lead scheduler" with no staff management duties is acceptable; a "team lead" who supervises others is not
+- NOTE: "Office manager" at a solo/small group practice is acceptable ONLY IF explicitly no staff management AND less than 5 years experience required
 
 US-only credentials REQUIRED (not "preferred"):
 - CPC, CCS, RHIA, RHIT, CHBA, CPMA, COC, CPC-A, CCS-P, CHPS, CIC, CDEO, CRCR — these are AAPC/AHIMA exams requiring US-based testing

@@ -1,11 +1,11 @@
 import type { JobSource, ScrapeSourceStatus } from "@/types";
 
 export const JOB_SOURCE_META = {
-  remotive: { label: "Remotive", requested: true },
-  jobicy: { label: "Jobicy", requested: true },
-  wwr_dom: { label: "We Work Remotely", requested: true },
+  remotive: { label: "Remotive", requested: false },
+  jobicy: { label: "Jobicy", requested: false },
+  wwr_dom: { label: "We Work Remotely", requested: false },
   linkedin: { label: "LinkedIn", requested: true },
-  hn: { label: "HN Hiring", requested: true },
+  hn: { label: "HN Hiring", requested: false },
   // Sources below are disabled — kept in the type for historical DB rows
   wellfound: { label: "Wellfound", requested: false },
   monster: { label: "Monster", requested: false },
@@ -27,12 +27,8 @@ export const JOB_SOURCE_META = {
  * Keep in sync with scraperForSource() in src/lib/scrapers/index.ts.
  */
 export const ENABLED_SOURCES: JobSource[] = [
-  "remotive",
-  "jobicy",
-  "wwr_dom",
   "linkedin",
   "indeed",
-  "hn",
 ];
 
 export const REQUESTED_JOB_SOURCES = Object.entries(JOB_SOURCE_META)
