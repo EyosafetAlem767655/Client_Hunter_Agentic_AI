@@ -9,5 +9,11 @@
     "api/py/scrape_jobs.py": {
       "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    { "path": "/api/cron/cleanup", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/scrape",  "schedule": "0 6 * * *" },
+    { "path": "/api/cron/train",   "schedule": "0 7 * * *" },
+    { "path": "/api/cron/outreach","schedule": "0 8 * * *" }
+  ]
 }

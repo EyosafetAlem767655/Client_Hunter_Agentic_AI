@@ -1400,6 +1400,11 @@ export async function listEnrichedJobs(params: {
       url: jobPostings.url,
       score: filteredJobs.score,
       enrichment: companyEnrichments,
+      contactCount: sql<number>`(
+        SELECT COUNT(*) FROM contacts
+        WHERE contacts.posting_id = ${jobPostings.id}
+        AND contacts.source_type = 'clay_enriched'
+      )`.as("contact_count"),
     })
     .from(companyEnrichments)
     .innerJoin(jobPostings, eq(jobPostings.id, companyEnrichments.postingId))
@@ -1419,7 +1424,66 @@ export async function listEnrichedJobs(params: {
     items: rows.map((r) => ({
       ...r,
       enrichedAt: r.enrichment.updatedAt,
+      contactCount: r.contactCount ?? 0,
     })),
     total: totalRow?.total ?? 0,
   };
+}
+
+// ── Close CRM helpers ────────────────────────────────────────────────────────
+
+export async function saveCloseLeadId(
+  postingId: number,
+  closeLeadId: string,
+  closeLeadStatus: string
+): Promise<void> {
+  await getDb()
+    .update(companyEnrichments)
+    .set({ closeLeadId, closeLeadStatus, updatedAt: new Date() })
+    .where(eq(companyEnrichments.postingId, postingId));
+}
+
+export async function clearCloseLeadId(postingId: number): Promise<void> {
+  await getDb()
+    .update(companyEnrichments)
+    .set({ closeLeadId: null, closeLeadStatus: null, updatedAt: new Date() })
+    .where(eq(companyEnrichments.postingId, postingId));
+}
+
+export async function listEnrichmentsLinkedToCrm(): Promise<
+  Array<{ postingId: number; closeLeadId: string }>
+> {
+  const rows = await getDb()
+    .select({
+      postingId: companyEnrichments.postingId,
+      closeLeadId: companyEnrichments.closeLeadId,
+    })
+    .from(companyEnrichments)
+    .where(isNotNull(companyEnrichments.closeLeadId));
+  return rows as Array<{ postingId: number; closeLeadId: string }>;
+}
+
+export async function updateCloseLeadStatus(
+  postingId: number,
+  closeLeadStatus: string
+): Promise<void> {
+  await getDb()
+    .update(companyEnrichments)
+    .set({ closeLeadStatus, updatedAt: new Date() })
+    .where(eq(companyEnrichments.postingId, postingId));
+}
+
+// ── Feedback / training helpers ───────────────────────────────────────────────
+
+export async function countNewFeedbackSince(since: Date): Promise<number> {
+  const [row] = await getDb()
+    .select({ total: count() })
+    .from(filteredJobs)
+    .where(
+      and(
+        isNotNull(filteredJobs.userFeedback),
+        gte(filteredJobs.feedbackAt, since)
+      )
+    );
+  return row?.total ?? 0;
 }

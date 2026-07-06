@@ -173,6 +173,8 @@ export const companyEnrichments = pgTable(
     annualRevenue: text("annual_revenue"),
     practiceSize: text("practice_size"),
     rawData: jsonb("raw_data").$type<Record<string, unknown>>(),
+    closeLeadId: text("close_lead_id"),
+    closeLeadStatus: text("close_lead_status"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

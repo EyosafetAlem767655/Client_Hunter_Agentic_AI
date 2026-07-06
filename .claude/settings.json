@@ -5,7 +5,11 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:www.clay.com)",
       "PowerShell(cd \"c:\\\\Users\\\\Administrator\\\\Projects\\\\Job_hunter_agentic_AI\"; npx tsc --noEmit 2>&1 | Where-Object { $_ -notmatch \"npm notice\" } | Select-Object -First 80)",
-      "PowerShell(cd \"c:\\\\Users\\\\Administrator\\\\Projects\\\\Job_hunter_agentic_AI\"; npx tsc --noEmit 2>&1 | Where-Object { $_ -notmatch \"npm notice\" })"
+      "PowerShell(cd \"c:\\\\Users\\\\Administrator\\\\Projects\\\\Job_hunter_agentic_AI\"; npx tsc --noEmit 2>&1 | Where-Object { $_ -notmatch \"npm notice\" })",
+      "Bash(mkdir -p \"c:/Users/Administrator/Projects/Job_hunter_agentic_AI/src/app/api/crm/close/unlink/[postingId]\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Administrator\\Projects\\Job_hunter_agentic_AI\\src\\app\\api\\crm\\close\\unlink"
     ]
   }
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { closePost, isCloseConfigured } from "@/lib/close/client";
-import { getEnrichmentDetail } from "@/lib/db/queries";
+import { closePost, closePut, isCloseConfigured } from "@/lib/close/client";
+import { getEnrichmentDetail, saveCloseLeadId } from "@/lib/db/queries";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   try {
     const { enrichment, leads } = await getEnrichmentDetail(postingId);
 
-    const contacts = leads.map((l) => ({
+    const contactPayload = leads.map((l) => ({
       name: l.name ?? "Unknown",
       title: l.title ?? undefined,
       emails: l.email ? [{ email: l.email, type: "office" }] : [],
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       urls: l.contactUrl ? [{ url: l.contactUrl, type: "linkedin" }] : [],
     }));
 
-    const lead = await closePost<{ id: string }>("/lead/", {
+    const leadMeta = {
       name: enrichment?.companyName ?? `Job posting #${postingId}`,
       url: enrichment?.website ?? undefined,
       description: [
@@ -41,10 +41,36 @@ export async function POST(req: NextRequest) {
       ]
         .filter(Boolean)
         .join(" · "),
-      contacts,
-    });
+    };
 
-    return NextResponse.json({ ok: true, leadId: lead.id, contactsCreated: contacts.length });
+    let lead: { id: string; status_label?: string };
+    let action: "created" | "updated";
+
+    if (enrichment?.closeLeadId) {
+      // Lead already in Close — update metadata only, don't re-add contacts
+      lead = await closePut<{ id: string; status_label?: string }>(
+        `/lead/${enrichment.closeLeadId}/`,
+        leadMeta
+      );
+      action = "updated";
+    } else {
+      // First push — create with embedded contacts
+      lead = await closePost<{ id: string; status_label?: string }>("/lead/", {
+        ...leadMeta,
+        contacts: contactPayload,
+      });
+      action = "created";
+    }
+
+    // Always persist the lead ID and status back to DB
+    await saveCloseLeadId(postingId, lead.id, lead.status_label ?? "Active");
+
+    return NextResponse.json({
+      ok: true,
+      action,
+      leadId: lead.id,
+      contactsCreated: action === "created" ? contactPayload.length : 0,
+    });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Push failed" },
