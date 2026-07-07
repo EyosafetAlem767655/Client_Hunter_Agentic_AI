@@ -75,7 +75,11 @@ export async function upsertJobPosting(posting: RawPosting) {
   return row;
 }
 
-export async function listJobsWithShortDescriptions(limit: number, maxLen: number) {
+export async function listJobsWithShortDescriptions(
+  limit: number,
+  maxLen: number,
+  since: Date
+) {
   const db = getDb();
   return db
     .select({
@@ -90,7 +94,8 @@ export async function listJobsWithShortDescriptions(limit: number, maxLen: numbe
     .where(
       and(
         sql`length(${jobPostings.description}) < ${maxLen}`,
-        ne(jobPostings.source, "linkedin")
+        ne(jobPostings.source, "linkedin"),
+        gte(jobPostings.scrapedAt, since)
       )
     )
     .orderBy(desc(jobPostings.scrapedAt))

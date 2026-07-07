@@ -88,8 +88,9 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const n = Math.max(1, Math.min(30, Number(url.searchParams.get("n") ?? 20)));
   const minLen = 500; // jobs with description shorter than this are candidates
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000); // last 24 hours only
 
-  const jobs = await listJobsWithShortDescriptions(n, minLen);
+  const jobs = await listJobsWithShortDescriptions(n, minLen, since);
 
   let updated = 0;
   let skipped = 0;
