@@ -14,6 +14,25 @@ vi.mock("@/lib/agent/orchestrator", () => ({
     failed: 0,
     durationMs: 100,
   }),
+  runScrapePipelineForSource: vi.fn().mockResolvedValue({
+    scraped: 5,
+    inserted: 3,
+    filtered: 1,
+  }),
+}));
+
+vi.mock("@/lib/agent/memory", () => ({
+  memory: {
+    getSetting: vi.fn().mockResolvedValue(null),
+    setSetting: vi.fn().mockResolvedValue(undefined),
+    createAgentRun: vi.fn().mockResolvedValue({ id: 1 }),
+    finishAgentRun: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+vi.mock("@/lib/email/digest", () => ({
+  sendDailyDigest: vi.fn().mockResolvedValue({ sent: false, count: 0, dryRun: true }),
+  sendInstantVaAlert: vi.fn().mockResolvedValue({ sent: false, count: 0, dryRun: true }),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -79,7 +98,7 @@ describe("API routes", () => {
     );
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json).toHaveProperty("runId");
+    expect(json).toHaveProperty("linkedin");
   });
 
   it("manual scrape rejects without admin token", async () => {

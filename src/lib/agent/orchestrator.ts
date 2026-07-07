@@ -9,10 +9,13 @@ import {
   sendApprovedEmails,
 } from "./action";
 import { memory } from "./memory";
-import { runPerception } from "./perception";
+import { runPerception, ingestPostings } from "./perception";
 import { filterPendingPostings } from "./medical-filter";
+import { filterVaPostings } from "./va-filter";
 import { setRunId, logEvent } from "./observability";
 import { sendDailyDigest, sendInstantVaAlert } from "@/lib/email/digest";
+import { LinkedInScraper } from "@/lib/scrapers/linkedin";
+import { IndeedScraper } from "@/lib/scrapers/indeed";
 import type { RawPosting } from "@/types";
 import type { PipelineSummary, ScrapeSourceStatus } from "@/types";
 
@@ -330,4 +333,32 @@ export async function runOutreachPipeline(): Promise<PipelineSummary> {
     failed,
     durationMs: Date.now() - start,
   };
+}
+
+/**
+ * Scrape, ingest, and filter jobs for a single source.
+ * Used by the chained cron pattern where each source runs in its own
+ * Vercel function invocation and therefore gets a dedicated 60 s budget.
+ */
+export async function runScrapePipelineForSource(
+  source: "linkedin" | "indeed",
+  opts: { timeoutMs: number; filterLimit?: number }
+): Promise<{ scraped: number; inserted: number; filtered: number }> {
+  const contact = env.CONTACT_EMAIL;
+  const scraper =
+    source === "linkedin"
+      ? new LinkedInScraper(contact)
+      : new IndeedScraper(contact);
+
+  const postings = await scraper.fetchWithinBudget(200, opts.timeoutMs);
+  const vaFiltered = filterVaPostings(postings);
+  const { inserted } = await ingestPostings(vaFiltered);
+
+  const filterResult = await filterPendingPostings(opts.filterLimit ?? 50, {
+    maxBatches: 1,
+    llmTimeoutMs: 20_000,
+    llmMaxRetries: 1,
+  });
+
+  return { scraped: postings.length, inserted, filtered: filterResult.succeeded };
 }

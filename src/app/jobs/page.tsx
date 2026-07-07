@@ -1,33 +1,27 @@
 import Link from "next/link";
-import { JobsTable, type JobRow } from "@/components/jobs/jobs-table";
+import { JobsView, type JobRow } from "@/components/jobs/jobs-view";
 import { FeedbackTab, type FeedbackEntry } from "@/components/jobs/feedback-tab";
-import { LeadStatusTab } from "@/components/jobs/lead-status-tab";
-import { EnrichmentTab } from "@/components/jobs/enrichment-tab";
 import { CloseCrmTab } from "@/components/jobs/close-crm-tab";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
 import { listJobsPaginated, listAllFeedback, getSetting } from "@/lib/db/queries";
 import { jobSourceLabel } from "@/lib/job-sources";
-import type { contacts, filteredJobs, jobPostings } from "@/lib/db/schema";
+import type { filteredJobs, jobPostings } from "@/lib/db/schema";
 
 type JobListItem = {
   posting: typeof jobPostings.$inferSelect;
-  filtered: typeof filteredJobs.$inferSelect | null;
-  contact?: typeof contacts.$inferSelect;
+  filtered?: typeof filteredJobs.$inferSelect | null;
+  isEnriched?: boolean;
 };
 
-const TABS: Array<{ key: string; label: string; status?: string }> = [
-  { key: "all", label: "All scraped" },
-  { key: "relevant", label: "Relevant", status: "relevant" },
-  { key: "unfiltered", label: "Unfiltered", status: "unfiltered" },
-  { key: "lead-status", label: "Lead Status", status: "lead-status" },
-  { key: "enrichment", label: "Enrichment", status: "enrichment" },
-  { key: "crm", label: "Close CRM", status: "crm" },
-  { key: "feedback", label: "Feedback", status: "feedback" },
+const TABS: Array<{ key: string; label: string; statuses: string[] }> = [
+  { key: "jobs",     label: "Jobs",      statuses: ["all", "relevant", "unfiltered", "lead-status", "enrichment"] },
+  { key: "crm",      label: "Close CRM", statuses: ["crm"] },
+  { key: "feedback", label: "Feedback",  statuses: ["feedback"] },
 ];
 
 const WINDOWS: Array<{ value: string; label: string }> = [
   { value: "24h", label: "24h" },
-  { value: "7d", label: "7d" },
+  { value: "7d",  label: "7d" },
   { value: "30d", label: "30d" },
   { value: "all", label: "All time" },
 ];
@@ -39,13 +33,16 @@ export const dynamic = "force-dynamic";
 export default async function JobsPage({
   searchParams,
 }: {
-  searchParams?: { status?: string; window?: string; page?: string; job?: string };
+  searchParams?: { status?: string; window?: string; page?: string };
 }) {
   const activeStatus = searchParams?.status ?? "all";
   const activeWindow = searchParams?.window ?? "7d";
   const currentPage = Math.max(1, Number(searchParams?.page ?? 1));
   const timeWindow = activeWindow === "all" ? undefined : activeWindow;
-  const jobId = searchParams?.job;
+
+  const activeTabKey =
+    TABS.find((t) => t.statuses.includes(activeStatus))?.key ?? "jobs";
+  const isJobsTab = activeTabKey === "jobs";
 
   let jobs: JobRow[] = [];
   let feedbackEntries: FeedbackEntry[] = [];
@@ -53,9 +50,11 @@ export default async function JobsPage({
   let error: string | null = null;
   let total = 0;
 
-  if (activeStatus === "lead-status" || activeStatus === "enrichment" || activeStatus === "crm") {
-    // All data fetched client-side in LeadStatusTab / EnrichmentTab / CloseCrmTab
-  } else if (activeStatus === "feedback") {
+  if (activeTabKey === "crm" || activeTabKey === "feedback") {
+    // Client-side components fetch their own data
+  }
+
+  if (activeTabKey === "feedback") {
     try {
       const [rawEntries, learnedRulesStr] = await Promise.all([
         listAllFeedback(),
@@ -77,17 +76,22 @@ export default async function JobsPage({
         try {
           const parsed = JSON.parse(learnedRulesStr) as { trainedAt?: string };
           lastTrainedAt = parsed.trainedAt ?? null;
-        } catch {
-          // ignore
-        }
+        } catch { /* ignore */ }
       }
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load feedback";
     }
-  } else {
+  }
+
+  if (isJobsTab) {
+    // "lead-status" and "enrichment" legacy params fall through to "all"
+    const queryStatus =
+      activeStatus === "relevant" || activeStatus === "unfiltered"
+        ? activeStatus
+        : undefined;
     try {
       const { items, total: rowTotal } = await listJobsPaginated({
-        status: activeStatus === "all" ? undefined : activeStatus,
+        status: queryStatus,
         timeWindow,
         page: currentPage,
         pageSize: PAGE_SIZE,
@@ -107,8 +111,7 @@ export default async function JobsPage({
         scrapedAt: row.posting.scrapedAt
           ? new Date(row.posting.scrapedAt).toISOString()
           : null,
-        contactEmail: row.contact?.email ?? null,
-        contactUrl: row.contact?.contactUrl ?? null,
+        isEnriched: (row.isEnriched as boolean) ?? false,
         userFeedback: row.filtered?.userFeedback ?? null,
         userNotes: row.filtered?.userNotes ?? null,
       }));
@@ -124,34 +127,39 @@ export default async function JobsPage({
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Job postings</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {total} {total === 1 ? "row" : "rows"} ·{" "}
-            {activeWindow === "all" ? "all time" : `last ${activeWindow}`}
-          </p>
+          {isJobsTab && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {total} {total === 1 ? "row" : "rows"} ·{" "}
+              {activeWindow === "all" ? "all time" : `last ${activeWindow}`}
+            </p>
+          )}
         </div>
-        <div className="inline-flex rounded-xl border border-amber-900/15 bg-white/50 p-1 backdrop-blur">
-          {WINDOWS.map((w) => (
-            <Link
-              key={w.value}
-              href={{
-                pathname: "/jobs",
-                query: {
-                  ...(activeStatus !== "all" ? { status: activeStatus } : {}),
-                  window: w.value,
-                },
-              }}
-              className={`rounded-lg px-3 py-1.5 text-sm transition ${
-                activeWindow === w.value
-                  ? "bg-gradient-to-r from-amber-700 to-orange-600 text-white shadow"
-                  : "text-foreground/70 hover:text-foreground"
-              }`}
-            >
-              {w.label}
-            </Link>
-          ))}
-        </div>
+        {isJobsTab && (
+          <div className="inline-flex rounded-xl border border-amber-900/15 bg-white/50 p-1 backdrop-blur">
+            {WINDOWS.map((w) => (
+              <Link
+                key={w.value}
+                href={{
+                  pathname: "/jobs",
+                  query: {
+                    ...(activeStatus !== "all" ? { status: activeStatus } : {}),
+                    window: w.value,
+                  },
+                }}
+                className={`rounded-lg px-3 py-1.5 text-sm transition ${
+                  activeWindow === w.value
+                    ? "bg-gradient-to-r from-amber-700 to-orange-600 text-white shadow"
+                    : "text-foreground/70 hover:text-foreground"
+                }`}
+              >
+                {w.label}
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* Main tabs */}
       <div className="flex flex-wrap gap-2 border-b border-amber-900/15 pb-2">
         {TABS.map((tab) => (
           <Link
@@ -159,12 +167,12 @@ export default async function JobsPage({
             href={{
               pathname: "/jobs",
               query: {
-                ...(tab.status ? { status: tab.status } : {}),
+                ...(tab.key !== "jobs" ? { status: tab.statuses[0] } : {}),
                 window: activeWindow,
               },
             }}
             className={`rounded-lg px-3 py-1.5 text-sm transition ${
-              activeStatus === tab.key
+              activeTabKey === tab.key
                 ? "bg-amber-200/60 text-foreground"
                 : "text-muted-foreground hover:text-foreground"
             }`}
@@ -175,90 +183,20 @@ export default async function JobsPage({
       </div>
 
       {error && <DbErrorBanner message={error} />}
-      {!error && activeStatus === "feedback" && (
+
+      {!error && activeTabKey === "jobs" && (
+        <JobsView
+          jobs={jobs}
+          total={total}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          activeFilter={activeStatus}
+          activeWindow={activeWindow}
+        />
+      )}
+      {!error && activeTabKey === "crm" && <CloseCrmTab />}
+      {!error && activeTabKey === "feedback" && (
         <FeedbackTab entries={feedbackEntries} lastTrainedAt={lastTrainedAt} />
-      )}
-      {!error && activeStatus === "lead-status" && <LeadStatusTab />}
-      {!error && activeStatus === "enrichment" && <EnrichmentTab initialJobId={jobId} />}
-      {!error && activeStatus === "crm" && <CloseCrmTab />}
-      {!error && activeStatus !== "feedback" && activeStatus !== "lead-status" && activeStatus !== "enrichment" && activeStatus !== "crm" && (
-        <JobsTable jobs={jobs} />
-      )}
-
-      {/* Pagination */}
-      {activeStatus !== "feedback" && activeStatus !== "lead-status" && activeStatus !== "enrichment" && activeStatus !== "crm" && totalPages > 1 && (
-        <div className="flex items-center justify-center gap-1 pt-2">
-          {currentPage > 1 && (
-            <Link
-              href={{
-                pathname: "/jobs",
-                query: {
-                  ...(activeStatus !== "all" ? { status: activeStatus } : {}),
-                  window: activeWindow,
-                  page: currentPage - 1,
-                },
-              }}
-              className="rounded-lg border border-border/40 px-3 py-1.5 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition"
-            >
-              ← Prev
-            </Link>
-          )}
-
-          {Array.from({ length: totalPages }, (_, i) => i + 1)
-            .filter(
-              (p) =>
-                p === 1 ||
-                p === totalPages ||
-                Math.abs(p - currentPage) <= 2
-            )
-            .reduce<(number | "...")[]>((acc, p, idx, arr) => {
-              if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("...");
-              acc.push(p);
-              return acc;
-            }, [])
-            .map((p, i) =>
-              p === "..." ? (
-                <span key={`ellipsis-${i}`} className="px-2 text-muted-foreground text-sm">
-                  …
-                </span>
-              ) : (
-                <Link
-                  key={p}
-                  href={{
-                    pathname: "/jobs",
-                    query: {
-                      ...(activeStatus !== "all" ? { status: activeStatus } : {}),
-                      window: activeWindow,
-                      page: p,
-                    },
-                  }}
-                  className={`rounded-lg border px-3 py-1.5 text-sm transition ${
-                    p === currentPage
-                      ? "border-amber-700/60 bg-amber-100/60 font-medium text-foreground"
-                      : "border-border/40 text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                  }`}
-                >
-                  {p}
-                </Link>
-              )
-            )}
-
-          {currentPage < totalPages && (
-            <Link
-              href={{
-                pathname: "/jobs",
-                query: {
-                  ...(activeStatus !== "all" ? { status: activeStatus } : {}),
-                  window: activeWindow,
-                  page: currentPage + 1,
-                },
-              }}
-              className="rounded-lg border border-border/40 px-3 py-1.5 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition"
-            >
-              Next →
-            </Link>
-          )}
-        </div>
       )}
     </div>
   );

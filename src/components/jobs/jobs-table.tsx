@@ -27,6 +27,7 @@ export interface JobRow {
   contactUrl?: string | null;
   userFeedback?: string | null;
   userNotes?: string | null;
+  isEnriched?: boolean;
 }
 
 function relativeTime(iso: string): string {

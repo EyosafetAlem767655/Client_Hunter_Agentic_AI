@@ -37,7 +37,7 @@ export class LinkedInScraper extends BaseScraper {
           try {
             const url =
               `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search` +
-              `?keywords=${encoded}&location=${param}&f_WT=2&f_TPR=r604800&start=${start}`;
+              `?keywords=${encoded}&location=${param}&f_WT=2&f_TPR=r86400&start=${start}`;
 
             const res = await this.fetchWithRetry(url);
             const html = await res.text();
@@ -92,7 +92,7 @@ export class LinkedInScraper extends BaseScraper {
         try {
           const url =
             `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search` +
-            `?keywords=${vaEncoded}&location=United+States&f_WT=2&f_TPR=r604800&start=${start}`;
+            `?keywords=${vaEncoded}&location=United+States&f_WT=2&f_TPR=r86400&start=${start}`;
           const res = await this.fetchWithRetry(url);
           const html = await res.text();
           const $ = cheerio.load(html);

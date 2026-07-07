@@ -23,7 +23,7 @@ export class IndeedScraper extends BaseScraper {
     for (const query of SEARCH_QUERIES) {
       if (out.length >= limit) break;
       const url =
-        `https://www.indeed.com/jobs?q=${query}&l=USA&from=${FROM_PARAM}&sort=date&fromage=7`;
+        `https://www.indeed.com/jobs?q=${query}&l=USA&from=${FROM_PARAM}&sort=date&fromage=1`;
       const parsed = new URL(url);
       if (!(await this.respectRobots(parsed.origin, parsed.pathname + parsed.search))) continue;
 
@@ -49,7 +49,7 @@ export class IndeedScraper extends BaseScraper {
     // ── Second round: "virtual assistant" USA remote (10 s cool-down) ──
     if (out.length < limit) {
       await sleep(10_000);
-      const vaUrl = `https://www.indeed.com/jobs?q=virtual+assistant&l=USA&from=${FROM_PARAM}&sort=date&fromage=7`;
+      const vaUrl = `https://www.indeed.com/jobs?q=virtual+assistant&l=USA&from=${FROM_PARAM}&sort=date&fromage=1`;
       const parsed = new URL(vaUrl);
       if (await this.respectRobots(parsed.origin, parsed.pathname + parsed.search)) {
         await sleep(5_000);

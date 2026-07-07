@@ -840,7 +840,13 @@ export async function listJobsPaginated(params: {
       ? and(visiblePostingSource(), gte(jobPostings.scrapedAt, since))
       : visiblePostingSource();
     const rows = await db
-      .select({ posting: jobPostings })
+      .select({
+        posting: jobPostings,
+        isEnriched: sql<boolean>`EXISTS (
+          SELECT 1 FROM company_enrichments
+          WHERE company_enrichments.posting_id = ${jobPostings.id}
+        )`.as("is_enriched"),
+      })
       .from(jobPostings)
       .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
       .where(and(isNull(filteredJobs.id), where))
@@ -883,7 +889,14 @@ export async function listJobsPaginated(params: {
       ? and(visiblePostingSource(), gte(jobPostings.scrapedAt, since))
       : visiblePostingSource();
     const items = await db
-      .select({ posting: jobPostings, filtered: filteredJobs })
+      .select({
+        posting: jobPostings,
+        filtered: filteredJobs,
+        isEnriched: sql<boolean>`EXISTS (
+          SELECT 1 FROM company_enrichments
+          WHERE company_enrichments.posting_id = ${jobPostings.id}
+        )`.as("is_enriched"),
+      })
       .from(jobPostings)
       .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
       .where(where)
@@ -912,7 +925,14 @@ export async function listJobsPaginated(params: {
 
   const where = conditions.length ? and(...conditions) : undefined;
   const items = await db
-    .select({ posting: jobPostings, filtered: filteredJobs })
+    .select({
+      posting: jobPostings,
+      filtered: filteredJobs,
+      isEnriched: sql<boolean>`EXISTS (
+        SELECT 1 FROM company_enrichments
+        WHERE company_enrichments.posting_id = ${jobPostings.id}
+      )`.as("is_enriched"),
+    })
     .from(filteredJobs)
     .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
     .where(where)
