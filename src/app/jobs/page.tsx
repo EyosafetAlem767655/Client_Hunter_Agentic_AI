@@ -182,6 +182,7 @@ export default async function JobsPage({
 
       {!error && activeTabKey === "jobs" && (
         <JobsView
+          key={`${activeSort}-${activeWindow}-${currentPage}`}
           jobs={jobs}
           total={total}
           currentPage={currentPage}
