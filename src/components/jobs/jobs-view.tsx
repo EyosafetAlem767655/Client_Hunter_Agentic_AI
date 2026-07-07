@@ -3,12 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { JobRow } from "./jobs-table";
@@ -67,7 +66,7 @@ function ScoreBadge({ score }: { score: number | null }) {
   );
 }
 
-// ─── FeedbackSection (inline in Sheet) ───────────────────────────────────────
+// ─── FeedbackSection ─────────────────────────────────────────────────────────
 
 function FeedbackSection({ job }: { job: JobRow }) {
   const [selected, setSelected] = useState<string | null>(job.userFeedback ?? null);
@@ -443,44 +442,111 @@ export function JobsView({
         </div>
       )}
 
-      {/* Job detail Sheet */}
-      <Sheet open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
-        <SheetTrigger className="hidden" />
-        <SheetContent>
+      {/* Job detail full-screen dialog */}
+      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+        <DialogContent>
           {selected && (
             <>
-              <SheetHeader>
-                <SheetTitle>{selected.title}</SheetTitle>
-              </SheetHeader>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <span>{selected.company}</span>
-                <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-                  {selected.sourceLabel}
-                </span>
-                <ScoreBadge score={selected.score} />
-              </div>
-              <a
-                href={selected.url}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-2 block text-sm text-primary hover:underline"
-              >
-                View posting ↗
-              </a>
-              {selected.fitReason && (
-                <div className="mt-4 rounded-lg bg-muted/40 p-4">
-                  <h4 className="text-sm font-semibold">LLM reasoning</h4>
-                  <p className="mt-2 text-sm text-muted-foreground">{selected.fitReason}</p>
+              {/* ── Fixed header ── */}
+              <DialogHeader>
+                <DialogTitle>{selected.title}</DialogTitle>
+
+                {/* Metadata row */}
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">{selected.company}</span>
+                  <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                    {selected.sourceLabel}
+                  </span>
+                  {selected.scrapedAt && (
+                    <span className="text-xs">{relativeTime(selected.scrapedAt)}</span>
+                  )}
                 </div>
-              )}
-              <FeedbackSection key={selected.id} job={selected} />
-              <div className="mt-4 max-h-96 overflow-y-auto whitespace-pre-wrap text-sm">
-                {selected.description.slice(0, 3000)}
+
+                {/* Action row */}
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <a
+                    href={selected.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm text-primary hover:underline"
+                  >
+                    View posting ↗
+                  </a>
+                  {!selected.isEnriched ? (
+                    <button
+                      onClick={() => enrichOne(selected)}
+                      disabled={enrichingId === selected.id}
+                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition"
+                    >
+                      {enrichingId === selected.id ? "Enriching…" : "Enrich"}
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                      {enrichResults[selected.id] ?? "Enriched ✓"}
+                    </span>
+                  )}
+                  {enrichResults[selected.id] && !selected.isEnriched && (
+                    <span className={cn(
+                      "text-xs",
+                      enrichResults[selected.id].startsWith("Error") ? "text-red-600" : "text-emerald-700"
+                    )}>
+                      {enrichResults[selected.id]}
+                    </span>
+                  )}
+                </div>
+              </DialogHeader>
+
+              {/* ── Scrollable body ── */}
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+
+                {/* Score + AI reasoning */}
+                <section>
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      AI Relevancy
+                    </h3>
+                    {selected.score !== null ? (
+                      <span className={cn(
+                        "text-3xl font-bold tabular-nums",
+                        selected.score >= 80 ? "text-green-700"
+                          : selected.score >= 60 ? "text-amber-700"
+                          : selected.score >= 40 ? "text-orange-700"
+                          : "text-red-700"
+                      )}>
+                        {selected.score}
+                        <span className="text-lg font-normal text-muted-foreground">/100</span>
+                      </span>
+                    ) : (
+                      <span className="text-sm text-muted-foreground italic">Not yet scored</span>
+                    )}
+                  </div>
+                  {selected.fitReason ? (
+                    <p className="mt-2 text-sm leading-relaxed text-foreground/80">{selected.fitReason}</p>
+                  ) : (
+                    <p className="mt-2 text-sm text-muted-foreground italic">
+                      No AI reasoning available yet — run the filter pipeline to score this job.
+                    </p>
+                  )}
+                </section>
+
+                {/* RHLF */}
+                <FeedbackSection key={selected.id} job={selected} />
+
+                {/* Full description */}
+                <section>
+                  <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Job Description
+                  </h3>
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
+                    {selected.description}
+                  </div>
+                </section>
+
               </div>
             </>
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
