@@ -1,0 +1,25 @@
+#!/bin/sh
+#
+# Pre-commit gate — mirrors the CI test job so a failing coverage threshold is
+# caught locally instead of in CI. Runs the full vitest suite with coverage
+# (global threshold: 80%). Skip in an emergency with `git commit --no-verify`.
+#
+# Enable once per clone with:  git config core.hooksPath .githooks
+
+# Invoke vitest directly via npx rather than `pnpm run` — pnpm's pre-run
+# "verify deps" step runs `pnpm install`, which can fail on unrelated ignored
+# build scripts. npx resolves the local node_modules binary and just runs it.
+echo "▶ pre-commit: running tests with coverage (vitest --coverage)…"
+
+npx vitest run --coverage
+status=$?
+
+if [ $status -ne 0 ]; then
+  echo ""
+  echo "✖ pre-commit: tests or coverage threshold failed — commit aborted."
+  echo "  Fix the failure, or bypass with: git commit --no-verify"
+  exit $status
+fi
+
+echo "✔ pre-commit: tests passed."
+exit 0
