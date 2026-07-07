@@ -100,6 +100,9 @@ const envSchema = z.object({
   REED_API_KEY: z.string().min(1).optional(),
   CLAY_API_KEY: z.string().min(1).optional(),
   CLAY_WEBHOOK_URL: z.string().url().optional(),
+  CLAY_AUTH_TOKEN: z.string().min(1).optional(),
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  CLAUDE_MODEL: z.string().min(1).default("claude-opus-4-8"),
   CLOSE_API_KEY: z.string().min(1).optional(),
 });
 

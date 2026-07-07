@@ -1354,9 +1354,12 @@ export async function saveCompanyEnrichment(
     annualRevenue: string | null;
     facilitiesCount: number | null;
     rawData?: Record<string, unknown>;
+    status?: string;
   }
 ): Promise<void> {
   const db = getDb();
+
+  const status = data.status ?? "complete";
 
   const practiceSize =
     data.staffCount !== null
@@ -1371,7 +1374,7 @@ export async function saveCompanyEnrichment(
     .insert(companyEnrichments)
     .values({
       postingId,
-      status: "complete",
+      status,
       companyName: data.companyName,
       location: data.location,
       website: data.website,
@@ -1384,7 +1387,7 @@ export async function saveCompanyEnrichment(
     .onConflictDoUpdate({
       target: companyEnrichments.postingId,
       set: {
-        status: "complete",
+        status,
         companyName: data.companyName,
         location: data.location,
         website: data.website,

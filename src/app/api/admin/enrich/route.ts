@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { verifyAdminAuth } from "@/lib/auth";
-import { enrichCompanyWithClay, isClayConfigured } from "@/lib/clay/client";
-import { listEligibleLeadJobs, saveCompanyEnrichment, saveEnrichedContacts } from "@/lib/db/queries";
+import { env } from "@/lib/env";
+import { findAndSendDomain } from "@/lib/clay/domain-finder";
+import { getJobPostingById, saveCompanyEnrichment } from "@/lib/db/queries";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -17,9 +18,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  if (!isClayConfigured()) {
+  const missing = [
+    !env.ANTHROPIC_API_KEY && "ANTHROPIC_API_KEY",
+    !env.CLAY_WEBHOOK_URL && "CLAY_WEBHOOK_URL",
+    !env.CLAY_AUTH_TOKEN && "CLAY_AUTH_TOKEN",
+    !env.LANGSEARCH_API_KEY && "LANGSEARCH_API_KEY",
+  ].filter(Boolean);
+  if (missing.length > 0) {
     return NextResponse.json(
-      { ok: false, error: "CLAY_API_KEY not configured" },
+      { ok: false, error: `Not configured — set: ${missing.join(", ")}` },
       { status: 400 }
     );
   }
@@ -31,35 +38,41 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "postingId is required" }, { status: 400 });
   }
 
+  const job = await getJobPostingById(body.postingId);
+  if (!job) {
+    return NextResponse.json({ ok: false, error: "Job not found" }, { status: 404 });
+  }
+
   try {
-    const { items } = await listEligibleLeadJobs({ page: 1, pageSize: 500 });
-    const job = items.find((j) => j.postingId === body.postingId);
-    if (!job) {
-      return NextResponse.json(
-        { ok: false, error: "Job not found or score below 60" },
-        { status: 404 }
-      );
-    }
+    const result = await findAndSendDomain(job.company, body.postingId);
 
-    const result = await enrichCompanyWithClay({
-      company: job.company,
-      jobTitle: job.title,
-      jobUrl: job.url,
-    });
-
+    // Record the attempt. "pending" while we wait for Clay's callback to post
+    // the enriched leads back; the /api/webhooks/clay receiver flips it to
+    // "complete" and saves the contacts.
     await saveCompanyEnrichment(body.postingId, {
-      companyName: result.company.name ?? job.company,
-      location: result.company.location,
-      website: result.company.website,
-      staffCount: result.company.staffCount,
-      annualRevenue: result.company.annualRevenue,
-      facilitiesCount: result.company.facilitiesCount,
-      rawData: { company: result.company, leads: result.leads },
+      companyName: job.company,
+      location: null,
+      website: result.domain,
+      staffCount: null,
+      annualRevenue: null,
+      facilitiesCount: null,
+      status: result.sent ? "pending" : "complete",
+      rawData: {
+        provider: "clay",
+        domain: result.domain,
+        reasoning: result.reasoning,
+        checkedDomains: result.checked,
+        sentToClay: result.sent,
+      },
     });
 
-    const contactsSaved = await saveEnrichedContacts(body.postingId, result.leads);
-
-    return NextResponse.json({ ok: true, postingId: body.postingId, contactsSaved });
+    return NextResponse.json({
+      ok: true,
+      postingId: body.postingId,
+      domain: result.domain,
+      reasoning: result.reasoning,
+      sent: result.sent,
+    });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "Enrichment failed" },

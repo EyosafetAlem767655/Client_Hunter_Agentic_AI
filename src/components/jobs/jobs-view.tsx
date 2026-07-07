@@ -140,12 +140,186 @@ function FeedbackSection({ job }: { job: JobRow }) {
   );
 }
 
+// ─── Enrichment panel (Clay) ──────────────────────────────────────────────────
+
+interface EnrichTriggerInfo {
+  domain: string | null;
+  reasoning: string;
+  sent: boolean;
+}
+
+interface EnrichLead {
+  id: number;
+  name: string | null;
+  title: string | null;
+  email: string | null;
+  phone: string | null;
+  contactUrl: string | null;
+}
+
+interface EnrichmentApiResp {
+  enrichment: {
+    website: string | null;
+    status: string;
+    companyName: string | null;
+    rawData?: Record<string, unknown> | null;
+  } | null;
+  leads: EnrichLead[];
+}
+
+function EnrichmentPanel({
+  job,
+  triggerInfo,
+  enriching,
+  onEnrich,
+}: {
+  job: JobRow;
+  triggerInfo?: EnrichTriggerInfo;
+  enriching: boolean;
+  onEnrich: (job: JobRow) => void;
+}) {
+  const [data, setData] = useState<EnrichmentApiResp | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/enrichment/${job.id}`);
+      if (res.ok) setData((await res.json()) as EnrichmentApiResp);
+    } catch { /* ignore */ }
+  }, [job.id]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  // Auto-poll while Clay hasn't returned leads yet (status pending, no leads).
+  const status = data?.enrichment?.status;
+  const leadCount = data?.leads?.length ?? 0;
+  useEffect(() => {
+    if (status !== "pending" || leadCount > 0) return;
+    const iv = setInterval(() => void load(), 5000);
+    const stop = setTimeout(() => clearInterval(iv), 70_000);
+    return () => { clearInterval(iv); clearTimeout(stop); };
+  }, [status, leadCount, load]);
+
+  const enrichment = data?.enrichment;
+  const rawData = (enrichment?.rawData ?? {}) as Record<string, unknown>;
+  const domain = enrichment?.website ?? triggerInfo?.domain ?? null;
+  const reasoning =
+    (typeof rawData.reasoning === "string" ? rawData.reasoning : "") ||
+    triggerInfo?.reasoning ||
+    "";
+  const leads = data?.leads ?? [];
+  const waiting = status === "pending" && leadCount === 0;
+
+  return (
+    <section className="rounded-xl border border-emerald-900/15 bg-white/50 p-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-900/60">
+          Enrichment (Clay)
+        </h2>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onEnrich(job)}
+            disabled={enriching}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition"
+          >
+            {enriching ? (
+              <>
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
+                Finding domain…
+              </>
+            ) : (
+              <>⚡ Enrich with Clay</>
+            )}
+          </button>
+          <button
+            onClick={() => void load()}
+            className="rounded-lg border border-emerald-900/20 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-50 transition"
+          >
+            ↻ Refresh leads
+          </button>
+        </div>
+      </div>
+
+      {/* Chosen domain + Claude reasoning */}
+      {domain ? (
+        <div className="mb-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-semibold text-foreground/80">Chosen domain:</span>
+            <a href={`https://${domain}`} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">
+              {domain}
+            </a>
+            {triggerInfo && (
+              <span className={cn(
+                "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                triggerInfo.sent ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+              )}>
+                {triggerInfo.sent ? "Sent to Clay ✓" : "Not sent"}
+              </span>
+            )}
+          </div>
+          {reasoning && (
+            <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-foreground/70">
+              {reasoning}
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="mb-3 text-sm text-muted-foreground italic">
+          {enriching
+            ? "Finding the company's official domain…"
+            : "Not enriched yet — click “Enrich with Clay” to find the company domain and send it to Clay."}
+        </p>
+      )}
+
+      {/* Leads returned by Clay's callback */}
+      {leads.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="py-1 pr-3">Name</th>
+                <th className="py-1 pr-3">Title</th>
+                <th className="py-1 pr-3">Email</th>
+                <th className="py-1">LinkedIn</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leads.map((l) => (
+                <tr key={l.id} className="border-t border-border/30">
+                  <td className="py-1 pr-3">{l.name ?? "—"}</td>
+                  <td className="py-1 pr-3">{l.title ?? "—"}</td>
+                  <td className="py-1 pr-3">{l.email ?? "—"}</td>
+                  <td className="py-1">
+                    {l.contactUrl ? (
+                      <a href={l.contactUrl} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">
+                        profile ↗
+                      </a>
+                    ) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        domain && (
+          <p className="text-xs text-muted-foreground italic">
+            {waiting
+              ? "Waiting for Clay to return enriched leads… (auto-refreshing)"
+              : "No leads returned yet. Configure Clay to POST results back to /api/webhooks/clay, then Refresh."}
+          </p>
+        )
+      )}
+    </section>
+  );
+}
+
 // ─── Full-screen Job Detail Modal ─────────────────────────────────────────────
 
 interface JobDetailModalProps {
   job: JobRow;
   enrichingId: number | null;
   enrichResults: Record<number, string>;
+  enrichInfo: Record<number, EnrichTriggerInfo>;
   fetchingDescId: number | null;
   descErrors: Record<number, string>;
   onClose: () => void;
@@ -157,6 +331,7 @@ function JobDetailModal({
   job,
   enrichingId,
   enrichResults,
+  enrichInfo,
   fetchingDescId,
   descErrors,
   onClose,
@@ -278,28 +453,7 @@ function JobDetailModal({
               View original posting ↗
             </a>
 
-            {job.isEnriched ? (
-              <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-1.5 text-xs font-medium text-emerald-800">
-                ✓ {enrichResult ?? "Enriched"}
-              </span>
-            ) : (
-              <button
-                onClick={() => onEnrich(job)}
-                disabled={enrichingId === job.id}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition"
-              >
-                {enrichingId === job.id ? (
-                  <>
-                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
-                    Enriching…
-                  </>
-                ) : (
-                  <>⚡ Enrich with Clay</>
-                )}
-              </button>
-            )}
-
-            {enrichResult && !job.isEnriched && (
+            {enrichResult && (
               <span className={cn("text-xs font-medium", enrichResult.startsWith("Error") ? "text-red-600" : "text-emerald-700")}>
                 {enrichResult}
               </span>
@@ -359,6 +513,14 @@ function JobDetailModal({
                 </p>
               )}
             </section>
+
+            {/* Enrichment (Clay) */}
+            <EnrichmentPanel
+              job={job}
+              triggerInfo={enrichInfo[job.id]}
+              enriching={enrichingId === job.id}
+              onEnrich={onEnrich}
+            />
 
             {/* RHLF Feedback */}
             <section>
@@ -439,6 +601,7 @@ export function JobsView({
   // Enrichment
   const [enrichingId, setEnrichingId] = useState<number | null>(null);
   const [enrichResults, setEnrichResults] = useState<Record<number, string>>({});
+  const [enrichInfo, setEnrichInfo] = useState<Record<number, EnrichTriggerInfo>>({});
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
 
@@ -473,12 +636,30 @@ export function JobsView({
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ postingId: job.id }),
       });
-      const json = (await res.json()) as { ok?: boolean; contactsSaved?: number; error?: string };
+      const json = (await res.json()) as {
+        ok?: boolean;
+        domain?: string | null;
+        reasoning?: string;
+        sent?: boolean;
+        error?: string;
+      };
       if (json.ok) {
-        setEnrichResults((prev) => ({ ...prev, [job.id]: `✓ ${json.contactsSaved ?? 0} contact(s)` }));
-        setJobs((prev) => prev.map((j) => j.id === job.id ? { ...j, isEnriched: true } : j));
-        // Update selected if it's the one being enriched
-        setSelected((prev) => prev?.id === job.id ? { ...prev, isEnriched: true } : prev);
+        setEnrichInfo((prev) => ({
+          ...prev,
+          [job.id]: { domain: json.domain ?? null, reasoning: json.reasoning ?? "", sent: !!json.sent },
+        }));
+        setEnrichResults((prev) => ({
+          ...prev,
+          [job.id]: json.domain
+            ? json.sent
+              ? `✓ Sent ${json.domain} to Clay`
+              : `Found ${json.domain} (not sent)`
+            : "No confident domain found",
+        }));
+        if (json.sent) {
+          setJobs((prev) => prev.map((j) => j.id === job.id ? { ...j, isEnriched: true } : j));
+          setSelected((prev) => prev?.id === job.id ? { ...prev, isEnriched: true } : prev);
+        }
       } else {
         setEnrichResults((prev) => ({ ...prev, [job.id]: `Error: ${json.error ?? "Unknown"}` }));
       }
@@ -763,6 +944,7 @@ export function JobsView({
           job={selected}
           enrichingId={enrichingId}
           enrichResults={enrichResults}
+          enrichInfo={enrichInfo}
           fetchingDescId={fetchingDescId}
           descErrors={descErrors}
           onClose={() => setSelected(null)}
