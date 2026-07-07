@@ -142,29 +142,15 @@ function FeedbackSection({ job }: { job: JobRow }) {
 
 // ─── Full-screen Job Detail Modal ─────────────────────────────────────────────
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 interface JobDetailModalProps {
   job: JobRow;
   enrichingId: number | null;
   enrichResults: Record<number, string>;
-  syncingId: number | null;
-  syncResults: Record<number, string>;
   onClose: () => void;
   onEnrich: (job: JobRow) => void;
-  onSync: (job: JobRow) => void;
 }
 
-function JobDetailModal({
-  job,
-  enrichingId,
-  enrichResults,
-  syncingId,
-  syncResults,
-  onClose,
-  onEnrich,
-  onSync,
-}: JobDetailModalProps) {
+function JobDetailModal({ job, enrichingId, enrichResults, onClose, onEnrich }: JobDetailModalProps) {
   // Lock body scroll while open
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -189,10 +175,6 @@ function JobDetailModal({
     : "text-red-700";
 
   const enrichResult = enrichResults[job.id];
-  const syncResult = syncResults[job.id];
-  const isSyncing = syncingId === job.id;
-  const withinLast24h =
-    !!job.scrapedAt && Date.now() - new Date(job.scrapedAt).getTime() < DAY_MS;
 
   const modal = (
     <div
@@ -310,31 +292,6 @@ function JobDetailModal({
                 {enrichResult}
               </span>
             )}
-
-            {/* Per-job Sync & Re-analyze — only for jobs scraped in the last 24h */}
-            {withinLast24h && (
-              <button
-                onClick={() => onSync(job)}
-                disabled={isSyncing}
-                title="Re-fetch this job's full description from the source site and re-run the AI relevancy analysis"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-400 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 transition"
-              >
-                {isSyncing ? (
-                  <>
-                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
-                    Syncing &amp; re-analyzing…
-                  </>
-                ) : (
-                  <>↻ Sync &amp; Re-analyze</>
-                )}
-              </button>
-            )}
-
-            {syncResult && (
-              <span className={cn("text-xs font-medium", syncResult.startsWith("Error") ? "text-red-600" : "text-blue-700")}>
-                {syncResult}
-              </span>
-            )}
           </div>
         </div>
 
@@ -449,10 +406,6 @@ export function JobsView({
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
 
-  // Per-job Sync & Re-analyze
-  const [syncingId, setSyncingId] = useState<number | null>(null);
-  const [syncResults, setSyncResults] = useState<Record<number, string>>({});
-
   // Admin token prompt
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
@@ -512,54 +465,6 @@ export function JobsView({
     }
     setBulkProgress(`Done — ${done} enriched`);
     setBulkRunning(false);
-  }
-
-  // Sync + re-analyze a SINGLE job: re-fetch its description and re-run the AI
-  // analysis for just that posting, then patch the result in place. Never
-  // touches other jobs, so it can't inflate the relevant count across the board.
-  async function syncOne(job: JobRow) {
-    const token = getToken();
-    if (!token) { setShowTokenInput(true); return; }
-
-    setSyncingId(job.id);
-    setSyncResults((prev) => { const n = { ...prev }; delete n[job.id]; return n; });
-    try {
-      const res = await fetch("/api/admin/sync/job", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ postingId: job.id }),
-      });
-      const json = (await res.json()) as {
-        ok?: boolean;
-        score?: number;
-        isRelevant?: boolean;
-        fitReason?: string | null;
-        description?: string;
-        descriptionUpdated?: boolean;
-        error?: string;
-      };
-
-      if (json.ok) {
-        const patch: Partial<JobRow> = {
-          score: json.score ?? job.score,
-          isRelevant: json.isRelevant ?? job.isRelevant,
-          fitReason: json.fitReason ?? job.fitReason,
-          description: json.description ?? job.description,
-        };
-        setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, ...patch } : j)));
-        setSelected((prev) => (prev?.id === job.id ? { ...prev, ...patch } : prev));
-        setSyncResults((prev) => ({
-          ...prev,
-          [job.id]: json.descriptionUpdated ? "✓ Synced & re-analyzed" : "✓ Re-analyzed",
-        }));
-      } else {
-        setSyncResults((prev) => ({ ...prev, [job.id]: `Error: ${json.error ?? "Unknown"}` }));
-      }
-    } catch (e) {
-      setSyncResults((prev) => ({ ...prev, [job.id]: `Error: ${e instanceof Error ? e.message : String(e)}` }));
-    } finally {
-      setSyncingId(null);
-    }
   }
 
   const normalised = SORT_MODES.some((m) => m.value === activeSort) ? activeSort : "all";
@@ -782,11 +687,8 @@ export function JobsView({
           job={selected}
           enrichingId={enrichingId}
           enrichResults={enrichResults}
-          syncingId={syncingId}
-          syncResults={syncResults}
           onClose={() => setSelected(null)}
           onEnrich={enrichOne}
-          onSync={syncOne}
         />
       )}
     </>

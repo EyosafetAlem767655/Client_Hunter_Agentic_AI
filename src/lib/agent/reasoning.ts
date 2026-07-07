@@ -16,6 +16,8 @@ import { sha256Hex } from "@/lib/hash";
 import { sleep } from "@/lib/utils";
 import { memory } from "./memory";
 import { logEvent } from "./observability";
+import { fetchFullDescription } from "@/lib/scrapers/fetch-description";
+import { updateJobPostingDescription } from "@/lib/db/queries";
 
 export interface FilterRunResult {
   processed: number;
@@ -43,7 +45,45 @@ type Posting = {
   location: string;
   description: string;
   url: string;
+  source: string;
 };
+
+// Scrapers store a short stub description (e.g. "Title at Company") — the full
+// text only lives on each posting's detail page. Anything under this length is
+// treated as a stub worth re-fetching before we ask the LLM to judge it.
+const STUB_DESCRIPTION_MAX = 400;
+
+// Bound how many detail-page fetches run at once so a batch stays well under
+// the 60 s route budget even if some pages are slow.
+const DESCRIPTION_FETCH_CONCURRENCY = 5;
+
+/**
+ * For each posting whose stored description is still a stub, fetch the full
+ * job description from the source site, persist it, and update the in-memory
+ * posting so the LLM judges the real text. LinkedIn detail pages need auth, so
+ * they're skipped. Mutates `postings` in place; never throws.
+ */
+async function enrichBatchDescriptions(postings: Posting[]): Promise<void> {
+  const stubs = postings.filter(
+    (p) =>
+      p.source !== "linkedin" &&
+      /^https?:\/\//.test(p.url ?? "") &&
+      (p.description?.length ?? 0) < STUB_DESCRIPTION_MAX
+  );
+  if (stubs.length === 0) return;
+
+  await withConcurrency(stubs, DESCRIPTION_FETCH_CONCURRENCY, async (posting) => {
+    try {
+      const full = await fetchFullDescription(posting.url, posting.source);
+      if (full && full.length > (posting.description?.length ?? 0) + 50) {
+        posting.description = full;
+        await updateJobPostingDescription(posting.id, full);
+      }
+    } catch {
+      // Leave the stub in place — the LLM still scores from title/company.
+    }
+  });
+}
 
 interface BatchOutcome {
   newMatches: NewMatch[];
@@ -72,8 +112,21 @@ async function processBatch(
   feedbackExamples: FeedbackExample[] = [],
   learnedRules?: PromptLearnings
 ): Promise<BatchOutcome> {
+  // Pull full descriptions for stubs first, so the LLM judges real text and the
+  // cache key below reflects the description actually sent.
+  await enrichBatchDescriptions(postings);
+
   const inputHash = sha256Hex(
-    PROMPT_VERSION + JSON.stringify(postings.map((p) => ({ id: p.id, title: p.title })))
+    PROMPT_VERSION +
+      JSON.stringify(
+        postings.map((p) => ({
+          id: p.id,
+          title: p.title,
+          // Length is enough to bust the cache when a stub is replaced by full
+          // text, without bloating the hashed payload with the whole description.
+          descLen: p.description?.length ?? 0,
+        }))
+      )
   );
   const cached = await memory.getCachedLlm(env.OPENAI_FILTER_MODEL, inputHash);
   let parsed = cached ? parseFilteredBatch(cached) : null;
@@ -167,77 +220,6 @@ async function processBatch(
   }
 
   return { newMatches, processed, succeeded };
-}
-
-export interface SinglePostingAnalysis {
-  isRelevant: boolean;
-  score: number;
-  roleCategory: string | null;
-  fitReason: string | null;
-  estimatedSalaryRange: string | null;
-}
-
-/**
- * Re-analyze ONE posting and persist the result. Unlike the batch pipeline this
- * always calls the LLM fresh (no cache lookup) so a manual re-sync produces new,
- * detailed reasoning against the latest description. Scoped to a single posting,
- * so it can never re-queue the whole backlog.
- */
-export async function analyzeSinglePosting(
-  posting: Posting,
-  options: FilterBatchOptions = {}
-): Promise<SinglePostingAnalysis> {
-  const [feedbackExamples, learnedRulesStr] = await Promise.all([
-    memory.getFeedbackExamples(),
-    memory.getSetting("prompt_learnings"),
-  ]);
-  const learnedRules = learnedRulesStr
-    ? (JSON.parse(learnedRulesStr) as PromptLearnings)
-    : undefined;
-
-  const raw = await callOpenAIJson<unknown>({
-    model: env.OPENAI_FILTER_MODEL,
-    system: SYSTEM_PROMPT,
-    user: buildFilterPrompt(
-      [
-        {
-          title: posting.title,
-          company: posting.company,
-          location: posting.location,
-          description: posting.description,
-        },
-      ],
-      feedbackExamples as FeedbackExample[],
-      learnedRules
-    ),
-    jsonSchema: filteredJobJsonSchema as Record<string, unknown>,
-    timeoutMs: options.llmTimeoutMs,
-    maxRetries: options.llmMaxRetries,
-  });
-
-  const parsed = parseFilteredBatch(raw);
-  const match = parsed?.results.find((r) => r.postingIndex === 0);
-  const job = match?.job ?? FALLBACK_FILTERED;
-
-  await memory.insertFilteredJob({
-    postingId: posting.id,
-    isRelevant: job.isRelevant,
-    score: Math.round(job.score),
-    roleCategory: job.roleCategory,
-    fitReason: job.fitReason,
-    suggestedRegions: job.suggestedRegions,
-    estimatedSalaryRange: job.estimatedSalaryRange,
-    llmModel: env.OPENAI_FILTER_MODEL,
-    promptVersion: PROMPT_VERSION,
-  });
-
-  return {
-    isRelevant: job.isRelevant,
-    score: Math.round(job.score),
-    roleCategory: job.roleCategory,
-    fitReason: job.fitReason,
-    estimatedSalaryRange: job.estimatedSalaryRange,
-  };
 }
 
 /** Run async tasks with a max concurrency. */
