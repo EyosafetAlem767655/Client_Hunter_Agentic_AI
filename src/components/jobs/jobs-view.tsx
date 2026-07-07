@@ -1,13 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { JobRow } from "./jobs-table";
@@ -93,9 +88,14 @@ function FeedbackSection({ job }: { job: JobRow }) {
   function handleRating(rating: string) { setSelected(rating); setSaved(false); setShowRequired(false); }
 
   return (
-    <div className="mt-4 rounded-lg border border-border/40 p-4">
-      <h4 className="mb-3 text-sm font-semibold">Rate this classification</h4>
-      <div className="flex gap-1.5">
+    <div className="rounded-xl border border-amber-900/20 bg-amber-50/40 p-5">
+      <h4 className="mb-1 text-sm font-bold uppercase tracking-wide text-amber-900/70">
+        Rate this classification (RHLF)
+      </h4>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Your rating trains the AI to score future jobs more accurately.
+      </p>
+      <div className="flex gap-2">
         {(["1", "2", "3", "4", "5"] as const).map((r) => {
           const meta = RATING_META[r];
           const isActive = selected === r;
@@ -105,11 +105,11 @@ function FeedbackSection({ job }: { job: JobRow }) {
               onClick={() => handleRating(r)}
               title={meta.label}
               className={cn(
-                "flex flex-col items-center rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition",
+                "flex flex-col items-center rounded-xl border px-3 py-2 text-xs font-semibold transition",
                 isActive ? meta.activeClass : `border-border/40 text-muted-foreground ${meta.hoverClass}`
               )}
             >
-              <span className="text-sm font-bold">{r}</span>
+              <span className="text-base font-bold">{r}</span>
               <span className="text-[10px] font-normal leading-tight">{meta.label}</span>
             </button>
           );
@@ -118,26 +118,262 @@ function FeedbackSection({ job }: { job: JobRow }) {
       <textarea
         value={notes}
         onChange={(e) => { setNotes(e.target.value); setSaved(false); setShowRequired(false); }}
-        placeholder="Comment required — justify your rating"
+        placeholder="Comment required — explain why this rating fits"
         className={cn(
-          "mt-3 w-full resize-none rounded-lg border bg-transparent p-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30",
+          "mt-3 w-full resize-none rounded-xl border bg-white/60 p-3 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-amber-400/40",
           showRequired ? "border-red-400" : "border-border/40"
         )}
-        rows={2}
+        rows={3}
       />
       {showRequired && <p className="mt-1 text-xs text-red-600">Add a comment before saving</p>}
-      <div className="mt-2 flex items-center justify-between">
-        {saved ? <span className="text-xs font-medium text-green-700">✓ Saved</span> : <span />}
+      <div className="mt-3 flex items-center justify-between">
+        {saved ? <span className="text-sm font-medium text-green-700">✓ Feedback saved</span> : <span />}
         <button
           onClick={save}
           disabled={!selected || saving}
-          className="rounded-lg bg-amber-700 px-3 py-1.5 text-sm text-white transition hover:bg-amber-800 disabled:opacity-40"
+          className="rounded-xl bg-amber-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-800 disabled:opacity-40"
         >
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Saving…" : "Save Feedback"}
         </button>
       </div>
     </div>
   );
+}
+
+// ─── Full-screen Job Detail Modal ─────────────────────────────────────────────
+
+interface JobDetailModalProps {
+  job: JobRow;
+  enrichingId: number | null;
+  enrichResults: Record<number, string>;
+  onClose: () => void;
+  onEnrich: (job: JobRow) => void;
+}
+
+function JobDetailModal({ job, enrichingId, enrichResults, onClose, onEnrich }: JobDetailModalProps) {
+  // Lock body scroll while open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  // Escape key to close
+  const handleKey = useCallback((e: KeyboardEvent) => {
+    if (e.key === "Escape") onClose();
+  }, [onClose]);
+  useEffect(() => {
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [handleKey]);
+
+  const scoreColor =
+    job.score === null ? ""
+    : job.score >= 80 ? "text-green-700"
+    : job.score >= 60 ? "text-amber-700"
+    : job.score >= 40 ? "text-orange-700"
+    : "text-red-700";
+
+  const enrichResult = enrichResults[job.id];
+
+  const modal = (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        display: "flex",
+        flexDirection: "column",
+        background: "hsl(36, 35%, 92%)",
+      }}
+    >
+      {/* Backdrop click — only on the overlay itself, not its children */}
+      <div
+        style={{ position: "fixed", inset: 0, zIndex: -1, background: "rgba(0,0,0,0.5)" }}
+        onClick={onClose}
+      />
+
+      {/* Modal panel */}
+      <div
+        style={{
+          position: "relative",
+          display: "flex",
+          flexDirection: "column",
+          width: "100%",
+          height: "100%",
+          background: "hsl(36, 35%, 92%)",
+          overflow: "hidden",
+        }}
+      >
+        {/* ── Fixed header ── */}
+        <div
+          style={{
+            flexShrink: 0,
+            borderBottom: "1px solid rgba(120, 80, 30, 0.15)",
+            padding: "1.25rem 1.5rem",
+            background: "hsl(36, 38%, 90%)",
+          }}
+        >
+          {/* Close button */}
+          <button
+            onClick={onClose}
+            style={{
+              position: "absolute",
+              top: "1rem",
+              right: "1rem",
+              width: "2rem",
+              height: "2rem",
+              borderRadius: "9999px",
+              border: "1px solid rgba(120,80,30,0.2)",
+              background: "rgba(120,80,30,0.08)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "1.1rem",
+              color: "#6b4c2a",
+            }}
+            aria-label="Close"
+          >
+            ✕
+          </button>
+
+          {/* Title */}
+          <h1 style={{ fontSize: "1.35rem", fontWeight: 700, paddingRight: "2.5rem", color: "hsl(24, 35%, 18%)", lineHeight: 1.3 }}>
+            {job.title}
+          </h1>
+
+          {/* Meta row */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <span className="font-semibold text-foreground">{job.company}</span>
+            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+              {job.sourceLabel}
+            </span>
+            {job.scrapedAt && (
+              <span className="text-xs">{relativeTime(job.scrapedAt)}</span>
+            )}
+            <ScoreBadge score={job.score} />
+          </div>
+
+          {/* Action row */}
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <a
+              href={job.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 rounded-lg border border-amber-700/30 bg-amber-700/10 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-700/20 transition"
+            >
+              View original posting ↗
+            </a>
+
+            {job.isEnriched ? (
+              <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-1.5 text-xs font-medium text-emerald-800">
+                ✓ {enrichResult ?? "Enriched"}
+              </span>
+            ) : (
+              <button
+                onClick={() => onEnrich(job)}
+                disabled={enrichingId === job.id}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition"
+              >
+                {enrichingId === job.id ? (
+                  <>
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
+                    Enriching…
+                  </>
+                ) : (
+                  <>⚡ Enrich with Clay</>
+                )}
+              </button>
+            )}
+
+            {enrichResult && !job.isEnriched && (
+              <span className={cn("text-xs font-medium", enrichResult.startsWith("Error") ? "text-red-600" : "text-emerald-700")}>
+                {enrichResult}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* ── Scrollable body ── */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "1.5rem" }}>
+          <div className="mx-auto max-w-4xl space-y-8">
+
+            {/* Score + AI Reasoning */}
+            <section className="rounded-xl border border-amber-900/15 bg-white/50 p-6">
+              <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-amber-900/60">
+                AI Relevancy Score &amp; Reasoning
+              </h2>
+
+              {/* Score display */}
+              <div className="mb-4 flex items-baseline gap-2">
+                {job.score !== null ? (
+                  <>
+                    <span className={cn("text-5xl font-black tabular-nums", scoreColor)}>
+                      {job.score}
+                    </span>
+                    <span className="text-xl text-muted-foreground font-normal">/ 100</span>
+                    <span className={cn(
+                      "ml-2 rounded-full px-3 py-1 text-sm font-semibold",
+                      job.score >= 80 ? "bg-green-100 text-green-800"
+                        : job.score >= 60 ? "bg-amber-100 text-amber-800"
+                        : job.score >= 40 ? "bg-orange-100 text-orange-800"
+                        : "bg-red-100 text-red-700"
+                    )}>
+                      {job.score >= 80 ? "Strong Match"
+                        : job.score >= 60 ? "Good Match"
+                        : job.score >= 40 ? "Partial Match"
+                        : "Low Match"}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-lg text-muted-foreground italic">
+                    Not yet scored — run the filter pipeline to get an AI score.
+                  </span>
+                )}
+              </div>
+
+              {/* Reasoning */}
+              {job.fitReason ? (
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold text-foreground/70">Why the AI scored it this way:</h3>
+                  <p className="text-base leading-relaxed text-foreground/85 whitespace-pre-wrap">
+                    {job.fitReason}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">
+                  No AI reasoning available yet. The job hasn&apos;t been through the relevancy filter pipeline.
+                </p>
+              )}
+            </section>
+
+            {/* RHLF Feedback */}
+            <section>
+              <FeedbackSection key={job.id} job={job} />
+            </section>
+
+            {/* Full Job Description */}
+            <section className="rounded-xl border border-amber-900/15 bg-white/50 p-6">
+              <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-amber-900/60">
+                Full Job Description
+              </h2>
+              {job.description ? (
+                <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">
+                  {job.description}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">No description available for this posting.</p>
+              )}
+            </section>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(modal, document.body);
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -161,7 +397,6 @@ export function JobsView({
   activeSort,
   activeWindow,
 }: JobsViewProps) {
-  // Local jobs state so enrichment updates reflect immediately without re-fetch
   const [jobs, setJobs] = useState<JobRow[]>(initialJobs);
   const [selected, setSelected] = useState<JobRow | null>(null);
 
@@ -202,6 +437,8 @@ export function JobsView({
       if (json.ok) {
         setEnrichResults((prev) => ({ ...prev, [job.id]: `✓ ${json.contactsSaved ?? 0} contact(s)` }));
         setJobs((prev) => prev.map((j) => j.id === job.id ? { ...j, isEnriched: true } : j));
+        // Update selected if it's the one being enriched
+        setSelected((prev) => prev?.id === job.id ? { ...prev, isEnriched: true } : prev);
       } else {
         setEnrichResults((prev) => ({ ...prev, [job.id]: `Error: ${json.error ?? "Unknown"}` }));
       }
@@ -235,318 +472,225 @@ export function JobsView({
   const eligibleCount = jobs.filter((j) => !j.isEnriched).length;
 
   return (
-    <div className="space-y-4">
-      {/* Sub-filter chips + Enrich All row */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-xl border border-amber-900/15 bg-white/50 p-1 backdrop-blur">
-          {SORT_MODES.map((m) => (
-            <Link
-              key={m.value}
-              href={{
-                pathname: "/jobs",
-                query: {
-                  ...(m.value !== "all" ? { sort: m.value } : {}),
-                  window: activeWindow,
-                },
-              }}
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-sm transition",
-                normalised === m.value
-                  ? "bg-gradient-to-r from-amber-700 to-orange-600 text-white shadow"
-                  : "text-foreground/70 hover:text-foreground"
-              )}
-            >
-              {m.label}
-            </Link>
-          ))}
-        </div>
+    <>
+      <div className="space-y-4">
+        {/* Sub-filter chips + Enrich All row */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex rounded-xl border border-amber-900/15 bg-white/50 p-1 backdrop-blur">
+            {SORT_MODES.map((m) => (
+              <Link
+                key={m.value}
+                href={{
+                  pathname: "/jobs",
+                  query: {
+                    ...(m.value !== "all" ? { sort: m.value } : {}),
+                    window: activeWindow,
+                  },
+                }}
+                className={cn(
+                  "rounded-lg px-3 py-1.5 text-sm transition",
+                  normalised === m.value
+                    ? "bg-gradient-to-r from-amber-700 to-orange-600 text-white shadow"
+                    : "text-foreground/70 hover:text-foreground"
+                )}
+              >
+                {m.label}
+              </Link>
+            ))}
+          </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {showTokenInput ? (
-            <div className="flex items-center gap-2">
-              <input
-                type="password"
-                value={tokenDraft}
-                onChange={(e) => setTokenDraft(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && saveToken()}
-                placeholder="Paste admin token…"
-                className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
-              />
-              <button
-                onClick={saveToken}
-                className="rounded-lg bg-amber-700 px-3 py-1.5 text-sm text-white hover:bg-amber-800 transition"
-              >
-                Save
-              </button>
-              <button
-                onClick={() => setShowTokenInput(false)}
-                className="text-xs text-muted-foreground hover:text-foreground"
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            eligibleCount > 0 && (
-              <button
-                onClick={enrichAllEligible}
-                disabled={bulkRunning}
-                className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition"
-              >
-                {bulkRunning
-                  ? (bulkProgress ?? "Enriching…")
-                  : `Enrich All Eligible (${eligibleCount})`}
-              </button>
-            )
-          )}
-          {!bulkRunning && bulkProgress && (
-            <span className="text-xs font-medium text-emerald-700">{bulkProgress}</span>
-          )}
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="glass-card overflow-hidden rounded-xl">
-        <table className="w-full text-sm">
-          <thead className="border-b border-border/50 bg-muted/30 text-left text-muted-foreground">
-            <tr>
-              <th className="p-4">Title</th>
-              <th className="p-4">Company</th>
-              <th className="p-4">Source</th>
-              <th className="p-4 whitespace-nowrap">Scraped</th>
-              <th className="p-4">Score</th>
-              <th className="p-4">Status</th>
-              <th className="p-4">Enrichment</th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.length === 0 && (
-              <tr>
-                <td colSpan={7} className="p-8 text-center text-muted-foreground">
-                  No jobs match this filter yet.
-                </td>
-              </tr>
+          <div className="flex flex-wrap items-center gap-2">
+            {showTokenInput ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  value={tokenDraft}
+                  onChange={(e) => setTokenDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && saveToken()}
+                  placeholder="Paste admin token…"
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
+                />
+                <button
+                  onClick={saveToken}
+                  className="rounded-lg bg-amber-700 px-3 py-1.5 text-sm text-white hover:bg-amber-800 transition"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setShowTokenInput(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              eligibleCount > 0 && (
+                <button
+                  onClick={enrichAllEligible}
+                  disabled={bulkRunning}
+                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition"
+                >
+                  {bulkRunning
+                    ? (bulkProgress ?? "Enriching…")
+                    : `Enrich All Eligible (${eligibleCount})`}
+                </button>
+              )
             )}
-            {jobs.map((job) => (
-              <tr
-                key={job.id}
-                className="cursor-pointer border-b border-border/30 transition-colors hover:bg-accent/20"
-                onClick={() => setSelected(job)}
-              >
-                {/* Title */}
-                <td className="p-4 font-medium">
-                  <span className="flex items-center gap-1.5">
-                    {job.userFeedback && (
-                      <span
-                        title={`Your rating: ${job.userFeedback}/5`}
-                        className={cn(
-                          "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-bold ring-2 shadow-sm",
-                          ["1", "2"].includes(job.userFeedback)
-                            ? "bg-red-100 text-red-700 ring-red-300"
-                            : job.userFeedback === "3"
-                              ? "bg-amber-100 text-amber-700 ring-amber-300"
-                              : "bg-green-100 text-green-800 ring-green-300"
-                        )}
-                      >
-                        <span>★</span><span>{job.userFeedback}</span>
-                      </span>
-                    )}
-                    {job.title}
-                  </span>
-                </td>
+            {!bulkRunning && bulkProgress && (
+              <span className="text-xs font-medium text-emerald-700">{bulkProgress}</span>
+            )}
+          </div>
+        </div>
 
-                {/* Company */}
-                <td className="p-4">{job.company}</td>
-
-                {/* Source */}
-                <td className="p-4">
-                  <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-                    {job.sourceLabel}
-                  </span>
-                </td>
-
-                {/* Scraped */}
-                <td className="p-4 whitespace-nowrap text-xs text-muted-foreground">
-                  {job.scrapedAt ? relativeTime(job.scrapedAt) : "—"}
-                </td>
-
-                {/* Score */}
-                <td className="p-4">
-                  <ScoreBadge score={job.score} />
-                </td>
-
-                {/* Status */}
-                <td className="p-4">
-                  {job.isRelevant === null ? (
-                    <Badge variant="outline">Unfiltered</Badge>
-                  ) : job.isRelevant ? (
-                    <Badge>Relevant</Badge>
-                  ) : (
-                    <Badge variant="secondary">Skipped</Badge>
-                  )}
-                </td>
-
-                {/* Enrichment */}
-                <td className="p-4" onClick={(e) => e.stopPropagation()}>
-                  {job.isEnriched ? (
-                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
-                      {enrichResults[job.id] ?? "Enriched"}
-                    </span>
-                  ) : (
-                    <div className="flex flex-col gap-0.5">
-                      <button
-                        onClick={() => enrichOne(job)}
-                        disabled={enrichingId === job.id}
-                        className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition"
-                      >
-                        {enrichingId === job.id ? "…" : "Enrich"}
-                      </button>
-                      {enrichResults[job.id] && (
-                        <span className={cn(
-                          "text-[10px]",
-                          enrichResults[job.id].startsWith("Error") ? "text-red-600" : "text-emerald-700"
-                        )}>
-                          {enrichResults[job.id]}
+        {/* Table */}
+        <div className="glass-card overflow-hidden rounded-xl">
+          <table className="w-full text-sm">
+            <thead className="border-b border-border/50 bg-muted/30 text-left text-muted-foreground">
+              <tr>
+                <th className="p-4">Title</th>
+                <th className="p-4">Company</th>
+                <th className="p-4">Source</th>
+                <th className="p-4 whitespace-nowrap">Scraped</th>
+                <th className="p-4">Score</th>
+                <th className="p-4">Status</th>
+                <th className="p-4">Enrichment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {jobs.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                    No jobs match this filter yet.
+                  </td>
+                </tr>
+              )}
+              {jobs.map((job) => (
+                <tr
+                  key={job.id}
+                  className="cursor-pointer border-b border-border/30 transition-colors hover:bg-accent/20"
+                  onClick={() => setSelected(job)}
+                >
+                  {/* Title */}
+                  <td className="p-4 font-medium">
+                    <span className="flex items-center gap-1.5">
+                      {job.userFeedback && (
+                        <span
+                          title={`Your rating: ${job.userFeedback}/5`}
+                          className={cn(
+                            "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-bold ring-2 shadow-sm",
+                            ["1", "2"].includes(job.userFeedback)
+                              ? "bg-red-100 text-red-700 ring-red-300"
+                              : job.userFeedback === "3"
+                                ? "bg-amber-100 text-amber-700 ring-amber-300"
+                                : "bg-green-100 text-green-800 ring-green-300"
+                          )}
+                        >
+                          <span>★</span><span>{job.userFeedback}</span>
                         </span>
                       )}
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-1">
-          {currentPage > 1 && (
-            <Link
-              href={{ pathname: "/jobs", query: { ...(normalised !== "all" ? { sort: normalised } : {}), window: activeWindow, page: currentPage - 1 } }}
-              className="rounded-lg border border-border/40 px-3 py-1.5 text-sm hover:bg-accent/20 transition"
-            >
-              ← Prev
-            </Link>
-          )}
-          <span className="px-3 text-sm text-muted-foreground">
-            Page {currentPage} of {totalPages}
-          </span>
-          {currentPage < totalPages && (
-            <Link
-              href={{ pathname: "/jobs", query: { ...(normalised !== "all" ? { sort: normalised } : {}), window: activeWindow, page: currentPage + 1 } }}
-              className="rounded-lg border border-border/40 px-3 py-1.5 text-sm hover:bg-accent/20 transition"
-            >
-              Next →
-            </Link>
-          )}
-        </div>
-      )}
-
-      {/* Job detail full-screen dialog */}
-      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
-        <DialogContent>
-          {selected && (
-            <>
-              {/* ── Fixed header ── */}
-              <DialogHeader>
-                <DialogTitle>{selected.title}</DialogTitle>
-
-                {/* Metadata row */}
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">{selected.company}</span>
-                  <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-                    {selected.sourceLabel}
-                  </span>
-                  {selected.scrapedAt && (
-                    <span className="text-xs">{relativeTime(selected.scrapedAt)}</span>
-                  )}
-                </div>
-
-                {/* Action row */}
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <a
-                    href={selected.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm text-primary hover:underline"
-                  >
-                    View posting ↗
-                  </a>
-                  {!selected.isEnriched ? (
-                    <button
-                      onClick={() => enrichOne(selected)}
-                      disabled={enrichingId === selected.id}
-                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition"
-                    >
-                      {enrichingId === selected.id ? "Enriching…" : "Enrich"}
-                    </button>
-                  ) : (
-                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
-                      {enrichResults[selected.id] ?? "Enriched ✓"}
+                      {job.title}
                     </span>
-                  )}
-                  {enrichResults[selected.id] && !selected.isEnriched && (
-                    <span className={cn(
-                      "text-xs",
-                      enrichResults[selected.id].startsWith("Error") ? "text-red-600" : "text-emerald-700"
-                    )}>
-                      {enrichResults[selected.id]}
+                  </td>
+
+                  {/* Company */}
+                  <td className="p-4">{job.company}</td>
+
+                  {/* Source */}
+                  <td className="p-4">
+                    <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                      {job.sourceLabel}
                     </span>
-                  )}
-                </div>
-              </DialogHeader>
+                  </td>
 
-              {/* ── Scrollable body ── */}
-              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+                  {/* Scraped */}
+                  <td className="p-4 whitespace-nowrap text-xs text-muted-foreground">
+                    {job.scrapedAt ? relativeTime(job.scrapedAt) : "—"}
+                  </td>
 
-                {/* Score + AI reasoning */}
-                <section>
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      AI Relevancy
-                    </h3>
-                    {selected.score !== null ? (
-                      <span className={cn(
-                        "text-3xl font-bold tabular-nums",
-                        selected.score >= 80 ? "text-green-700"
-                          : selected.score >= 60 ? "text-amber-700"
-                          : selected.score >= 40 ? "text-orange-700"
-                          : "text-red-700"
-                      )}>
-                        {selected.score}
-                        <span className="text-lg font-normal text-muted-foreground">/100</span>
+                  {/* Score */}
+                  <td className="p-4">
+                    <ScoreBadge score={job.score} />
+                  </td>
+
+                  {/* Status */}
+                  <td className="p-4">
+                    {job.isRelevant === null ? (
+                      <Badge variant="outline">Unfiltered</Badge>
+                    ) : job.isRelevant ? (
+                      <Badge>Relevant</Badge>
+                    ) : (
+                      <Badge variant="secondary">Skipped</Badge>
+                    )}
+                  </td>
+
+                  {/* Enrichment */}
+                  <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                    {job.isEnriched ? (
+                      <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                        {enrichResults[job.id] ?? "Enriched"}
                       </span>
                     ) : (
-                      <span className="text-sm text-muted-foreground italic">Not yet scored</span>
+                      <div className="flex flex-col gap-0.5">
+                        <button
+                          onClick={() => enrichOne(job)}
+                          disabled={enrichingId === job.id}
+                          className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition"
+                        >
+                          {enrichingId === job.id ? "…" : "Enrich"}
+                        </button>
+                        {enrichResults[job.id] && (
+                          <span className={cn(
+                            "text-[10px]",
+                            enrichResults[job.id].startsWith("Error") ? "text-red-600" : "text-emerald-700"
+                          )}>
+                            {enrichResults[job.id]}
+                          </span>
+                        )}
+                      </div>
                     )}
-                  </div>
-                  {selected.fitReason ? (
-                    <p className="mt-2 text-sm leading-relaxed text-foreground/80">{selected.fitReason}</p>
-                  ) : (
-                    <p className="mt-2 text-sm text-muted-foreground italic">
-                      No AI reasoning available yet — run the filter pipeline to score this job.
-                    </p>
-                  )}
-                </section>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-                {/* RHLF */}
-                <FeedbackSection key={selected.id} job={selected} />
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-1">
+            {currentPage > 1 && (
+              <Link
+                href={{ pathname: "/jobs", query: { ...(normalised !== "all" ? { sort: normalised } : {}), window: activeWindow, page: currentPage - 1 } }}
+                className="rounded-lg border border-border/40 px-3 py-1.5 text-sm hover:bg-accent/20 transition"
+              >
+                ← Prev
+              </Link>
+            )}
+            <span className="px-3 text-sm text-muted-foreground">
+              Page {currentPage} of {totalPages}
+            </span>
+            {currentPage < totalPages && (
+              <Link
+                href={{ pathname: "/jobs", query: { ...(normalised !== "all" ? { sort: normalised } : {}), window: activeWindow, page: currentPage + 1 } }}
+                className="rounded-lg border border-border/40 px-3 py-1.5 text-sm hover:bg-accent/20 transition"
+              >
+                Next →
+              </Link>
+            )}
+          </div>
+        )}
+      </div>
 
-                {/* Full description */}
-                <section>
-                  <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                    Job Description
-                  </h3>
-                  <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
-                    {selected.description}
-                  </div>
-                </section>
-
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
+      {/* Full-screen job detail modal (portal to body) */}
+      {selected && (
+        <JobDetailModal
+          job={selected}
+          enrichingId={enrichingId}
+          enrichResults={enrichResults}
+          onClose={() => setSelected(null)}
+          onEnrich={enrichOne}
+        />
+      )}
+    </>
   );
 }
