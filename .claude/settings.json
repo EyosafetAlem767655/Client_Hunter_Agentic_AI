@@ -6,7 +6,26 @@
       "WebFetch(domain:www.clay.com)",
       "PowerShell(cd \"c:\\\\Users\\\\Administrator\\\\Projects\\\\Job_hunter_agentic_AI\"; npx tsc --noEmit 2>&1 | Where-Object { $_ -notmatch \"npm notice\" } | Select-Object -First 80)",
       "PowerShell(cd \"c:\\\\Users\\\\Administrator\\\\Projects\\\\Job_hunter_agentic_AI\"; npx tsc --noEmit 2>&1 | Where-Object { $_ -notmatch \"npm notice\" })",
-      "Bash(mkdir -p \"c:/Users/Administrator/Projects/Job_hunter_agentic_AI/src/app/api/crm/close/unlink/[postingId]\")"
+      "Bash(mkdir -p \"c:/Users/Administrator/Projects/Job_hunter_agentic_AI/src/app/api/crm/close/unlink/[postingId]\")",
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(git add -A)",
+      "PowerShell(git reset HEAD .claude/settings.json)",
+      "PowerShell(git commit -F \"C:\\\\Users\\\\ADMINI~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Administrator-Projects-Job-hunter-agentic-AI\\\\de258cd8-30f4-4640-a446-54550b854aef\\\\scratchpad\\\\commitmsg.txt\")",
+      "PowerShell(npx vitest run tests/unit/fetch-description.test.ts)",
+      "PowerShell(Get-ChildItem -Name \"pnpm-lock.yaml\",\"package-lock.json\",\"yarn.lock\" -ErrorAction SilentlyContinue; \"hooksPath: $\\(git config core.hooksPath\\)\")",
+      "Bash(git config *)",
+      "Bash(chmod +x .githooks/pre-commit)",
+      "Bash(echo \"hooksPath=$\\(git config core.hooksPath\\)\")",
+      "PowerShell(git add .githooks/pre-commit tests/unit/fetch-description.test.ts)",
+      "PowerShell(git commit -F \"C:\\\\Users\\\\ADMINI~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Administrator-Projects-Job-hunter-agentic-AI\\\\de258cd8-30f4-4640-a446-54550b854aef\\\\scratchpad\\\\commitmsg2.txt\")",
+      "PowerShell(git push)",
+      "Bash(DATABASE_URL='postgresql://neondb_owner:npg_qezrIKVub0S7@ep-spring-waterfall-aq6z725l-pooler.c-8.us-east-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require' node \"C:/Users/ADMINI~1/AppData/Local/Temp/claude/c--Users-Administrator-Projects-Job-hunter-agentic-AI/de258cd8-30f4-4640-a446-54550b854aef/scratchpad/delete-recent-jobs.mjs\")",
+      "Bash(DATABASE_URL='postgresql://neondb_owner:npg_qezrIKVub0S7@ep-spring-waterfall-aq6z725l-pooler.c-8.us-east-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require' node _delete_recent_tmp.mjs)",
+      "Bash(rm -f _delete_recent_tmp.mjs)",
+      "Bash(git rm *)",
+      "Bash(rmdir src/app/api/admin/sync/job src/app/api/admin/sync/descriptions src/app/api/admin/sync)",
+      "PowerShell(git add src/components/jobs/jobs-view.tsx src/lib/agent/reasoning.ts src/lib/db/queries.ts)",
+      "PowerShell(git commit -F \"C:\\\\Users\\\\ADMINI~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Administrator-Projects-Job-hunter-agentic-AI\\\\de258cd8-30f4-4640-a446-54550b854aef\\\\scratchpad\\\\commitmsg3.txt\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\Administrator\\Projects\\Job_hunter_agentic_AI\\src\\app\\api\\crm\\close\\unlink"

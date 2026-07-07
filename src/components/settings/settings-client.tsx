@@ -425,7 +425,7 @@ export function SettingsClient({
     // scrapes in parallel using Chrome TLS fingerprint (curl_cffi).
     if (source === "indeed") {
       window.open(
-        "https://www.indeed.com/jobs?q=medical+receptionist&l=Remote&sort=date&fromage=7&sc=0kf%3Aattr%28DSQF7%29%3B",
+        "https://www.indeed.com/jobs?q=virtual+assistant&l=USA&ts=1783086508397&pts=1782809878056&from=searchOnDesktopSerp&rq=1&rsIdx=0&newcount=170&fromage=last&vjk=a0ae8c45bbd0379a",
         "_blank",
         "noopener,noreferrer"
       );
