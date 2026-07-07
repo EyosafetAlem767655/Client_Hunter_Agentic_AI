@@ -903,7 +903,7 @@ export async function listJobsPaginated(params: {
       .where(where);
     const items = await (params.sort === "relevancy"
       ? baseQ.orderBy(
-          sql`COALESCE(${filteredJobs.score}, -1) DESC`,
+          desc(sql`COALESCE(${filteredJobs.score}, -1)`),
           desc(jobPostings.scrapedAt)
         )
       : baseQ.orderBy(desc(jobPostings.scrapedAt))
