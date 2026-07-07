@@ -73,7 +73,7 @@ async function processBatch(
   learnedRules?: PromptLearnings
 ): Promise<BatchOutcome> {
   const inputHash = sha256Hex(
-    JSON.stringify(postings.map((p) => ({ id: p.id, title: p.title })))
+    PROMPT_VERSION + JSON.stringify(postings.map((p) => ({ id: p.id, title: p.title })))
   );
   const cached = await memory.getCachedLlm(env.OPENAI_FILTER_MODEL, inputHash);
   let parsed = cached ? parseFilteredBatch(cached) : null;

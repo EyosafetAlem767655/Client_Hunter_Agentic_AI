@@ -75,6 +75,36 @@ export async function upsertJobPosting(posting: RawPosting) {
   return row;
 }
 
+export async function listJobsWithShortDescriptions(limit: number, maxLen: number) {
+  const db = getDb();
+  return db
+    .select({
+      id: jobPostings.id,
+      source: jobPostings.source,
+      url: jobPostings.url,
+      title: jobPostings.title,
+      company: jobPostings.company,
+      description: jobPostings.description,
+    })
+    .from(jobPostings)
+    .where(
+      and(
+        sql`length(${jobPostings.description}) < ${maxLen}`,
+        ne(jobPostings.source, "linkedin")
+      )
+    )
+    .orderBy(desc(jobPostings.scrapedAt))
+    .limit(limit);
+}
+
+export async function updateJobPostingDescription(id: number, description: string) {
+  const db = getDb();
+  await db
+    .update(jobPostings)
+    .set({ description })
+    .where(eq(jobPostings.id, id));
+}
+
 export async function getExistingExternalIds(
   source: string,
   externalIds: string[]

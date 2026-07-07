@@ -406,6 +406,10 @@ export function JobsView({
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
 
+  // Sync & Re-analyze
+  const [syncRunning, setSyncRunning] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+
   // Admin token prompt
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
@@ -465,6 +469,44 @@ export function JobsView({
     }
     setBulkProgress(`Done — ${done} enriched`);
     setBulkRunning(false);
+  }
+
+  async function syncAndReanalyze() {
+    const token = getToken();
+    if (!token) { setShowTokenInput(true); return; }
+
+    setSyncRunning(true);
+    setSyncStatus("Fetching full descriptions from job sites…");
+    try {
+      const syncRes = await fetch("/api/admin/sync/descriptions?n=30", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const syncJson = (await syncRes.json()) as { ok?: boolean; updated?: number; total?: number; error?: string };
+      if (!syncJson.ok) {
+        setSyncStatus(`Sync failed: ${syncJson.error ?? "unknown error"}`);
+        return;
+      }
+      setSyncStatus(`Updated ${syncJson.updated ?? 0}/${syncJson.total ?? 0} descriptions. Re-running AI analysis…`);
+
+      // Run filter loop until no more unfiltered/stale jobs (cap at 20 batches)
+      let filterTotal = 0;
+      for (let i = 0; i < 20; i++) {
+        const filterRes = await fetch("/api/manual/filter/next?n=8", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        });
+        const filterJson = (await filterRes.json()) as { ok?: boolean; done?: boolean; step?: { processed?: number } };
+        if (!filterJson.ok || filterJson.done) break;
+        filterTotal += filterJson.step?.processed ?? 0;
+        setSyncStatus(`AI analysis running… ${filterTotal} jobs re-analyzed`);
+      }
+
+      setSyncStatus(`Done — ${syncJson.updated ?? 0} descriptions synced, ${filterTotal} jobs re-analyzed. Refresh the page to see updated reasoning.`);
+    } catch (e) {
+      setSyncStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSyncRunning(false);
+    }
   }
 
   const normalised = SORT_MODES.some((m) => m.value === activeSort) ? activeSort : "all";
@@ -538,6 +580,26 @@ export function JobsView({
             )}
             {!bulkRunning && bulkProgress && (
               <span className="text-xs font-medium text-emerald-700">{bulkProgress}</span>
+            )}
+
+            {/* Sync & Re-analyze button */}
+            {!showTokenInput && (
+              <button
+                onClick={syncAndReanalyze}
+                disabled={syncRunning}
+                className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 transition"
+                title="Re-fetch job descriptions from source sites and re-run AI scoring with detailed reasoning"
+              >
+                {syncRunning ? "Syncing…" : "↻ Sync & Re-analyze"}
+              </button>
+            )}
+            {syncStatus && (
+              <span className={cn(
+                "text-xs font-medium",
+                syncStatus.startsWith("Error") ? "text-red-600" : "text-blue-700"
+              )}>
+                {syncStatus}
+              </span>
             )}
           </div>
         </div>

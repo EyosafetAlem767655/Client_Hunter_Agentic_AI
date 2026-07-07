@@ -1,4 +1,4 @@
-export const PROMPT_VERSION = "4.4.0";
+export const PROMPT_VERSION = "4.5.0";
 
 export const SYSTEM_PROMPT = `You are a relevance filter for a job seeker targeting remote medical administrative positions. The applicant is located outside the US (Ethiopia) and is seeking roles at US-based companies that are open to hiring internationally.
 
@@ -100,7 +100,7 @@ export function sanitizeUntrustedInput(text: string): string {
   const stripped = text
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
     .replace(/`/g, "'")
-    .slice(0, 4000);
+    .slice(0, 6000);
   return `<UNTRUSTED_INPUT>\n${stripped}\n</UNTRUSTED_INPUT>`;
 }
 
@@ -247,7 +247,7 @@ export function buildFilterPrompt(
 - Prioritize: small/mid practices, MSOs, billing companies with EHR tools and remote work
 ${learnedSection}${feedbackSection}
 
-Return JSON: { "results": [{ "postingIndex": number, "job": { "isRelevant": boolean, "score": number (0-100), "roleCategory": string, "fitReason": string (1 sentence), "suggestedRegions": string[] (["Philippines","India","Ethiopia"] for relevant, [] otherwise), "estimatedSalaryRange": string } }] }
+Return JSON: { "results": [{ "postingIndex": number, "job": { "isRelevant": boolean, "score": number (0-100), "roleCategory": string, "fitReason": string (3-5 sentences: 1) state the score and primary reason, 2) cite 2-3 specific duties/requirements pulled directly from the posting that support the decision, 3) call out any hard disqualifiers or standout positives by name, 4) give a clear final verdict. Be specific to THIS posting — never write generic boilerplate.), "suggestedRegions": string[] (["Philippines","India","Ethiopia"] for relevant, [] otherwise), "estimatedSalaryRange": string } }] }
 
 Postings:
 ${blocks}`;
