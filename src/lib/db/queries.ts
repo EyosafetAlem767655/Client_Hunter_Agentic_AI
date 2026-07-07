@@ -106,22 +106,36 @@ export async function getExistingExternalIds(
 // so they count as "unfiltered" here alongside never-filtered / stale-prompt rows.
 const RULE_BASED_MODEL = "rule-based";
 
-export async function listUnfilteredPostings(limit: number) {
+export async function listUnfilteredPostings(limit: number, source?: string) {
   const db = getDb();
+
+  // "Needs the LLM pass" — a job qualifies if it was never filtered, or it was
+  // re-scraped after it was last filtered (a fresh scrape refreshes scrapedAt).
+  // These two conditions naturally stop once filteredAt catches up to scrapedAt.
+  const justScrapedOrNew = or(
+    isNull(filteredJobs.id),
+    sql`${jobPostings.scrapedAt} > ${filteredJobs.filteredAt}`
+  );
+
+  // Source-scoped (a manual "filter Indeed" click) must touch ONLY the jobs that
+  // scrape just produced — nothing else. The global/cron path additionally sweeps
+  // background re-eval work: stale prompt versions and rule-based pre-filters.
+  const needsFilter = source
+    ? justScrapedOrNew
+    : or(
+        justScrapedOrNew,
+        ne(filteredJobs.promptVersion, PROMPT_VERSION),
+        eq(filteredJobs.llmModel, RULE_BASED_MODEL)
+      );
+
   return db
     .select({ posting: jobPostings })
     .from(jobPostings)
     .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
     .where(
       and(
-        or(
-          // Never filtered
-          isNull(filteredJobs.id),
-          // Filtered with an older prompt (needs re-evaluation)
-          ne(filteredJobs.promptVersion, PROMPT_VERSION),
-          // Only rule-based pre-filtered — still needs the LLM pass + justification
-          eq(filteredJobs.llmModel, RULE_BASED_MODEL)
-        ),
+        needsFilter,
+        source ? eq(jobPostings.source, source) : undefined,
         visiblePostingSource()
       )
     )
@@ -587,13 +601,22 @@ export async function getDashboardStats(timeWindow = "7d") {
     .from(jobPostings)
     .where(postingWhere);
 
+  // Count relevant jobs by the posting's scrapedAt window so this stays
+  // consistent with `scraped` above (which also windows on scrapedAt). Using
+  // filteredAt here made the two numbers disagree whenever a job was scraped
+  // and filtered in different windows.
   const [relevant] = await db
     .select({ total: count() })
     .from(filteredJobs)
+    .innerJoin(jobPostings, eq(jobPostings.id, filteredJobs.postingId))
     .where(
       since
-        ? and(eq(filteredJobs.isRelevant, true), gte(filteredJobs.filteredAt, since))
-        : eq(filteredJobs.isRelevant, true)
+        ? and(
+            eq(filteredJobs.isRelevant, true),
+            gte(jobPostings.scrapedAt, since),
+            visiblePostingSource()
+          )
+        : and(eq(filteredJobs.isRelevant, true), visiblePostingSource())
     );
 
   const [withContacts] = await db

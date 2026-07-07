@@ -234,7 +234,7 @@ export function SettingsClient({
     return { ok: true, data };
   }
 
-  async function runFilterLoop(): Promise<{
+  async function runFilterLoop(source?: string): Promise<{
     processed: number;
     succeeded: number;
     relevant: number;
@@ -245,9 +245,15 @@ export function SettingsClient({
     let relevant = 0;
     let steps = 0;
 
+    // Scope the filter to the source just scraped so "analyzed" matches what was
+    // scraped, instead of draining the whole cross-source backlog.
+    const filterPath = source
+      ? `/api/manual/filter/next?n=12&source=${encodeURIComponent(source)}`
+      : "/api/manual/filter/next?n=12";
+
     setLoading("Filter");
     for (let i = 0; i < 30; i++) {
-      const result = await runOne("/api/manual/filter/next?n=12", "Filter");
+      const result = await runOne(filterPath, "Filter");
       if (!result.ok) {
         throw new Error(result.error ?? "Filter failed");
       }
@@ -467,7 +473,7 @@ export function SettingsClient({
       // previous scrapes that haven't been filtered yet.
       setLoading("Filter");
       try {
-        const filter = await runFilterLoop();
+        const filter = await runFilterLoop(source);
         showToast("ok", `Filter done — ${filter.relevant} new relevant jobs`);
       } catch (e) {
         showToast(

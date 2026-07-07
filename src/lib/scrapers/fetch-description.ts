@@ -4,6 +4,22 @@ const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 /**
+ * Convert an HTML fragment/snippet to clean plain text. Scrapers (Indeed) store
+ * raw HTML snippets, which render as literal tags in the UI and pollute the LLM
+ * prompt. This normalizes them to readable prose. Returns the input trimmed when
+ * it contains no markup.
+ */
+export function htmlToText(html: string): string {
+  if (!html) return "";
+  if (!/[<&]/.test(html)) return html.replace(/\s+/g, " ").trim();
+  const $ = cheerio.load(html);
+  $("script, style").remove();
+  // Turn block/list boundaries into spaces so words don't run together.
+  $("br, li, p, div, ul, ol").after(" ");
+  return $.root().text().replace(/\s+/g, " ").trim();
+}
+
+/**
  * Re-fetch the full job description from the original posting URL.
  * Returns null when the page can't be fetched/parsed or nothing useful is found.
  * Shared by the per-job sync endpoint and the (24h) bulk description sync.

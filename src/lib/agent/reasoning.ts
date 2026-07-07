@@ -16,7 +16,7 @@ import { sha256Hex } from "@/lib/hash";
 import { sleep } from "@/lib/utils";
 import { memory } from "./memory";
 import { logEvent } from "./observability";
-import { fetchFullDescription } from "@/lib/scrapers/fetch-description";
+import { fetchFullDescription, htmlToText } from "@/lib/scrapers/fetch-description";
 import { updateJobPostingDescription } from "@/lib/db/queries";
 
 export interface FilterRunResult {
@@ -58,29 +58,32 @@ const STUB_DESCRIPTION_MAX = 400;
 const DESCRIPTION_FETCH_CONCURRENCY = 5;
 
 /**
- * For each posting whose stored description is still a stub, fetch the full
- * job description from the source site, persist it, and update the in-memory
- * posting so the LLM judges the real text. LinkedIn detail pages need auth, so
- * they're skipped. Mutates `postings` in place; never throws.
+ * Normalize each posting's description before the LLM sees it, so the model and
+ * the job-detail UI get the same clean prose:
+ *  - stubs from a fetchable (non-LinkedIn) source: pull the full detail page,
+ *  - any description: strip HTML (Indeed snippets, legacy rows) to plain text.
+ * Persists the cleaned text and mutates `postings` in place; never throws.
  */
 async function enrichBatchDescriptions(postings: Posting[]): Promise<void> {
-  const stubs = postings.filter(
-    (p) =>
-      p.source !== "linkedin" &&
-      /^https?:\/\//.test(p.url ?? "") &&
-      (p.description?.length ?? 0) < STUB_DESCRIPTION_MAX
-  );
-  if (stubs.length === 0) return;
-
-  await withConcurrency(stubs, DESCRIPTION_FETCH_CONCURRENCY, async (posting) => {
+  await withConcurrency(postings, DESCRIPTION_FETCH_CONCURRENCY, async (posting) => {
     try {
-      const full = await fetchFullDescription(posting.url, posting.source);
-      if (full && full.length > (posting.description?.length ?? 0) + 50) {
-        posting.description = full;
-        await updateJobPostingDescription(posting.id, full);
+      let text = posting.description ?? "";
+
+      const fetchable =
+        posting.source !== "linkedin" && /^https?:\/\//.test(posting.url ?? "");
+      if (fetchable && text.length < STUB_DESCRIPTION_MAX) {
+        const full = await fetchFullDescription(posting.url, posting.source);
+        if (full && full.length > text.length + 50) text = full;
+      }
+
+      // Strip any HTML to readable prose (no-op when already clean).
+      const clean = htmlToText(text);
+      if (clean && clean !== posting.description) {
+        posting.description = clean;
+        await updateJobPostingDescription(posting.id, clean);
       }
     } catch {
-      // Leave the stub in place — the LLM still scores from title/company.
+      // Leave as-is — the LLM still scores from title/company.
     }
   });
 }
@@ -104,6 +107,8 @@ export interface FilterPendingOptions extends FilterBatchOptions {
   concurrency?: number;
   /** Milliseconds to wait between sequential batch calls to respect rate limits. */
   batchDelayMs?: number;
+  /** Restrict filtering to a single job source (e.g. "indeed", "linkedin"). */
+  source?: string;
 }
 
 async function processBatch(
@@ -249,7 +254,7 @@ export async function filterPendingPostings(
   options: FilterPendingOptions = {}
 ): Promise<FilterRunResult> {
   const [pending, feedbackExamples, learnedRulesStr] = await Promise.all([
-    memory.listUnfilteredPostings(limit),
+    memory.listUnfilteredPostings(limit, options.source),
     memory.getFeedbackExamples(),
     memory.getSetting("prompt_learnings"),
   ]);

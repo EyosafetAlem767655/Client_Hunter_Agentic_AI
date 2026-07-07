@@ -21,6 +21,8 @@ export async function POST(request: Request) {
   // 8 jobs per batch keeps each OpenAI call small and well under the 60 s limit.
   // The UI loops this endpoint until done:true so all scraped jobs get processed.
   const n = Math.max(1, Math.min(24, Number(url.searchParams.get("n") ?? 8)));
+  // Optional source scope — clicking "Indeed" filters only Indeed jobs.
+  const source = url.searchParams.get("source") ?? undefined;
   const started = Date.now();
 
   try {
@@ -30,6 +32,7 @@ export async function POST(request: Request) {
       llmTimeoutMs: 35_000,
       llmMaxRetries: 2,
       throwOnLlmFailure: true,
+      source,
     });
     return NextResponse.json({
       ok: true,

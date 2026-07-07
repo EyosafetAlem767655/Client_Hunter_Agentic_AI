@@ -280,9 +280,9 @@ export interface NewMatch {
 
 export async function filterPendingPostings(
   limit: number,
-  _options: Record<string, unknown> = {}
+  options: { source?: string } & Record<string, unknown> = {}
 ): Promise<FilterRunResult> {
-  const pending = await memory.listUnfilteredPostings(limit);
+  const pending = await memory.listUnfilteredPostings(limit, options.source);
 
   let processed = 0;
   let succeeded = 0;

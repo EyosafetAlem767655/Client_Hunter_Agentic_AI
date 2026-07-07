@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fetchFullDescription } from "@/lib/scrapers/fetch-description";
+import { fetchFullDescription, htmlToText } from "@/lib/scrapers/fetch-description";
 
 function stubFetchHtml(html: string, init?: { ok?: boolean; status?: number }) {
   vi.stubGlobal(
@@ -98,5 +98,40 @@ describe("fetchFullDescription", () => {
     );
     const text = await fetchFullDescription("https://indeed.com/job/3", "indeed");
     expect(text).toBeNull();
+  });
+});
+
+describe("htmlToText", () => {
+  it("strips an Indeed-style HTML snippet to clean prose", () => {
+    const snippet =
+      '<ul style="list-style-type:circle;padding-left:20px;">' +
+      "<li>Answer phones and <b>schedule appointments</b></li>" +
+      "<li>Verify insurance eligibility</li></ul>";
+    const text = htmlToText(snippet);
+    expect(text).not.toMatch(/[<>]/);
+    expect(text).not.toContain("list-style-type");
+    expect(text).toContain("Answer phones and schedule appointments");
+    expect(text).toContain("Verify insurance eligibility");
+  });
+
+  it("inserts spaces at block/list boundaries so words don't run together", () => {
+    const text = htmlToText("<li>First duty</li><li>Second duty</li>");
+    expect(text).toContain("First duty");
+    expect(text).toContain("Second duty");
+    expect(text).not.toContain("dutySecond");
+  });
+
+  it("drops script/style content", () => {
+    const text = htmlToText("<div>Real text<script>evil()</script><style>.x{}</style></div>");
+    expect(text).toBe("Real text");
+  });
+
+  it("returns plain input unchanged (no markup)", () => {
+    expect(htmlToText("Just plain text")).toBe("Just plain text");
+    expect(htmlToText("  spaced   out  ")).toBe("spaced out");
+  });
+
+  it("handles empty input", () => {
+    expect(htmlToText("")).toBe("");
   });
 });

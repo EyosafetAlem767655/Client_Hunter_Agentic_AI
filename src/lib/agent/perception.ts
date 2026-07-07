@@ -10,14 +10,20 @@ type Engine = "node" | "python";
 
 export async function ingestPostings(
   postings: RawPosting[]
-): Promise<{ scraped: number; inserted: number }> {
-  const novel = await filterNewPostings(postings);
-  let inserted = 0;
-  for (const posting of novel) {
-    await memory.upsertJobPosting(posting);
-    inserted++;
+): Promise<{ scraped: number; inserted: number; postingIds: number[] }> {
+  // Count genuinely-new postings for the `inserted` stat, but upsert *every*
+  // scraped posting so re-encountered jobs get their scrapedAt refreshed
+  // (upsertJobPosting's onConflictDoUpdate sets scrapedAt = now). That replaces
+  // the old row with the freshly-scraped one and keeps it inside the 24h window.
+  const novelIds = new Set(
+    (await filterNewPostings(postings)).map((p) => p.externalId)
+  );
+  const postingIds: number[] = [];
+  for (const posting of postings) {
+    const row = await memory.upsertJobPosting(posting);
+    if (row?.id) postingIds.push(row.id);
   }
-  return { scraped: postings.length, inserted };
+  return { scraped: postings.length, inserted: novelIds.size, postingIds };
 }
 
 function pickEngine(): Engine {

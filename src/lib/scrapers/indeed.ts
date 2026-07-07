@@ -3,6 +3,7 @@ import type { RawPosting } from "@/types";
 import { sleep } from "@/lib/utils";
 import { BaseScraper } from "./base";
 import { absoluteUrl, dedupePostings } from "./html-card";
+import { htmlToText } from "./fetch-description";
 import { MEDICAL_VA_TITLES } from "./job-titles";
 
 const SEARCH_QUERIES = MEDICAL_VA_TITLES.map((t) => t.replace(/ /g, "+"));
@@ -112,7 +113,9 @@ export class IndeedScraper extends BaseScraper {
             title,
             company: job.company ?? "Unknown company",
             location,
-            description: job.snippet ?? title,
+            // Indeed snippets are raw HTML — store clean text so the UI and the
+            // LLM prompt get prose, not tags.
+            description: job.snippet ? htmlToText(job.snippet) || title : title,
             postedAt: job.pubDate ? new Date(job.pubDate) : null,
             raw: job,
           });
