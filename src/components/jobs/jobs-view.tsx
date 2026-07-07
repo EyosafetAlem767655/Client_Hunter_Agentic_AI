@@ -146,11 +146,23 @@ interface JobDetailModalProps {
   job: JobRow;
   enrichingId: number | null;
   enrichResults: Record<number, string>;
+  fetchingDescId: number | null;
+  descErrors: Record<number, string>;
   onClose: () => void;
   onEnrich: (job: JobRow) => void;
+  onFetchDescription: (job: JobRow) => void;
 }
 
-function JobDetailModal({ job, enrichingId, enrichResults, onClose, onEnrich }: JobDetailModalProps) {
+function JobDetailModal({
+  job,
+  enrichingId,
+  enrichResults,
+  fetchingDescId,
+  descErrors,
+  onClose,
+  onEnrich,
+  onFetchDescription,
+}: JobDetailModalProps) {
   // Lock body scroll while open
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -355,9 +367,33 @@ function JobDetailModal({ job, enrichingId, enrichResults, onClose, onEnrich }: 
 
             {/* Full Job Description */}
             <section className="rounded-xl border border-amber-900/15 bg-white/50 p-6">
-              <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-amber-900/60">
-                Full Job Description
-              </h2>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-xs font-bold uppercase tracking-widest text-amber-900/60">
+                  Full Job Description
+                </h2>
+                <button
+                  onClick={() => onFetchDescription(job)}
+                  disabled={fetchingDescId === job.id}
+                  title="Re-fetch the complete description from the original posting and clean it up"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-700/30 bg-amber-700/10 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-700/20 disabled:opacity-50 transition"
+                >
+                  {fetchingDescId === job.id ? (
+                    <>
+                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-700 border-t-transparent" />
+                      Fetching full description…
+                    </>
+                  ) : (
+                    <>↻ See full job description</>
+                  )}
+                </button>
+              </div>
+
+              {descErrors[job.id] && (
+                <p className="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {descErrors[job.id]}
+                </p>
+              )}
+
               {job.description ? (
                 <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">
                   {job.description}
@@ -406,6 +442,10 @@ export function JobsView({
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
 
+  // On-demand full-description fetch (per job)
+  const [fetchingDescId, setFetchingDescId] = useState<number | null>(null);
+  const [descErrors, setDescErrors] = useState<Record<number, string>>({});
+
   // Admin token prompt
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
@@ -446,6 +486,42 @@ export function JobsView({
       setEnrichResults((prev) => ({ ...prev, [job.id]: `Error: ${e instanceof Error ? e.message : String(e)}` }));
     } finally {
       setEnrichingId(null);
+    }
+  }
+
+  // Re-scrape ONE job's detail page for its full description (uses the stored
+  // URL), lets the LLM clean it up, and patches it into the open modal.
+  async function fetchFullDescriptionFor(job: JobRow) {
+    const token = getToken();
+    if (!token) {
+      setShowTokenInput(true);
+      setDescErrors((prev) => ({
+        ...prev,
+        [job.id]: "Set your admin token first (Jobs toolbar → paste token), then try again.",
+      }));
+      return;
+    }
+
+    setFetchingDescId(job.id);
+    setDescErrors((prev) => { const n = { ...prev }; delete n[job.id]; return n; });
+    try {
+      const res = await fetch("/api/jobs/full-description", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ postingId: job.id }),
+      });
+      const json = (await res.json()) as { ok?: boolean; description?: string; error?: string };
+      if (json.ok && json.description) {
+        const description = json.description;
+        setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, description } : j)));
+        setSelected((prev) => (prev?.id === job.id ? { ...prev, description } : prev));
+      } else {
+        setDescErrors((prev) => ({ ...prev, [job.id]: json.error ?? "Couldn't fetch the full description." }));
+      }
+    } catch (e) {
+      setDescErrors((prev) => ({ ...prev, [job.id]: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setFetchingDescId(null);
     }
   }
 
@@ -687,8 +763,11 @@ export function JobsView({
           job={selected}
           enrichingId={enrichingId}
           enrichResults={enrichResults}
+          fetchingDescId={fetchingDescId}
+          descErrors={descErrors}
           onClose={() => setSelected(null)}
           onEnrich={enrichOne}
+          onFetchDescription={fetchFullDescriptionFor}
         />
       )}
     </>
