@@ -25,7 +25,8 @@
       "Bash(git rm *)",
       "Bash(rmdir src/app/api/admin/sync/job src/app/api/admin/sync/descriptions src/app/api/admin/sync)",
       "PowerShell(git add src/components/jobs/jobs-view.tsx src/lib/agent/reasoning.ts src/lib/db/queries.ts)",
-      "PowerShell(git commit -F \"C:\\\\Users\\\\ADMINI~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Administrator-Projects-Job-hunter-agentic-AI\\\\de258cd8-30f4-4640-a446-54550b854aef\\\\scratchpad\\\\commitmsg3.txt\")"
+      "PowerShell(git commit -F \"C:\\\\Users\\\\ADMINI~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Administrator-Projects-Job-hunter-agentic-AI\\\\de258cd8-30f4-4640-a446-54550b854aef\\\\scratchpad\\\\commitmsg3.txt\")",
+      "Bash(git push *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Administrator\\Projects\\Job_hunter_agentic_AI\\src\\app\\api\\crm\\close\\unlink"
