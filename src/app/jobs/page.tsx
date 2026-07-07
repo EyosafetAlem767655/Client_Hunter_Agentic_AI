@@ -33,9 +33,10 @@ export const dynamic = "force-dynamic";
 export default async function JobsPage({
   searchParams,
 }: {
-  searchParams?: { status?: string; window?: string; page?: string };
+  searchParams?: { status?: string; sort?: string; window?: string; page?: string };
 }) {
   const activeStatus = searchParams?.status ?? "all";
+  const activeSort = (searchParams?.sort ?? "all") as "all" | "relevancy" | "recentness";
   const activeWindow = searchParams?.window ?? "7d";
   const currentPage = Math.max(1, Number(searchParams?.page ?? 1));
   const timeWindow = activeWindow === "all" ? undefined : activeWindow;
@@ -84,14 +85,9 @@ export default async function JobsPage({
   }
 
   if (isJobsTab) {
-    // "lead-status" and "enrichment" legacy params fall through to "all"
-    const queryStatus =
-      activeStatus === "relevant" || activeStatus === "unfiltered"
-        ? activeStatus
-        : undefined;
     try {
       const { items, total: rowTotal } = await listJobsPaginated({
-        status: queryStatus,
+        sort: activeSort === "all" ? undefined : activeSort,
         timeWindow,
         page: currentPage,
         pageSize: PAGE_SIZE,
@@ -142,7 +138,7 @@ export default async function JobsPage({
                 href={{
                   pathname: "/jobs",
                   query: {
-                    ...(activeStatus !== "all" ? { status: activeStatus } : {}),
+                    ...(activeSort !== "all" ? { sort: activeSort } : {}),
                     window: w.value,
                   },
                 }}
@@ -190,7 +186,7 @@ export default async function JobsPage({
           total={total}
           currentPage={currentPage}
           totalPages={totalPages}
-          activeFilter={activeStatus}
+          activeSort={activeSort}
           activeWindow={activeWindow}
         />
       )}

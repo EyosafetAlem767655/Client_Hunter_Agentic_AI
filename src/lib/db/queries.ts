@@ -826,6 +826,7 @@ export async function listRecentEvents(limit: number, offset: number) {
 
 export async function listJobsPaginated(params: {
   status?: string;
+  sort?: "relevancy" | "recentness";
   minScore?: number;
   page: number;
   pageSize: number;
@@ -888,7 +889,7 @@ export async function listJobsPaginated(params: {
     const where = since
       ? and(visiblePostingSource(), gte(jobPostings.scrapedAt, since))
       : visiblePostingSource();
-    const items = await db
+    const baseQ = db
       .select({
         posting: jobPostings,
         filtered: filteredJobs,
@@ -899,8 +900,14 @@ export async function listJobsPaginated(params: {
       })
       .from(jobPostings)
       .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
-      .where(where)
-      .orderBy(desc(jobPostings.scrapedAt))
+      .where(where);
+    const items = await (params.sort === "relevancy"
+      ? baseQ.orderBy(
+          sql`COALESCE(${filteredJobs.score}, -1) DESC`,
+          desc(jobPostings.scrapedAt)
+        )
+      : baseQ.orderBy(desc(jobPostings.scrapedAt))
+    )
       .limit(params.pageSize)
       .offset(offset);
     const [totalRow] = await db

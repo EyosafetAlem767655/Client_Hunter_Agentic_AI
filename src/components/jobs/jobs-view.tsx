@@ -19,10 +19,10 @@ export type { JobRow };
 
 const TOKEN_KEY = "talentbridge_admin_token";
 
-const SUB_FILTERS = [
-  { label: "All",        value: "all" },
-  { label: "Relevant",   value: "relevant" },
-  { label: "Pending AI", value: "unfiltered" },
+const SORT_MODES = [
+  { label: "All",           value: "all" },
+  { label: "By Relevancy",  value: "relevancy" },
+  { label: "By Recentness", value: "recentness" },
 ] as const;
 
 const RATING_META: Record<string, { label: string; activeClass: string; hoverClass: string }> = {
@@ -148,7 +148,7 @@ interface JobsViewProps {
   total: number;
   currentPage: number;
   totalPages: number;
-  activeFilter: string;
+  activeSort: string;
   activeWindow: string;
 }
 
@@ -159,7 +159,7 @@ export function JobsView({
   total,
   currentPage,
   totalPages,
-  activeFilter,
+  activeSort,
   activeWindow,
 }: JobsViewProps) {
   // Local jobs state so enrichment updates reflect immediately without re-fetch
@@ -217,7 +217,7 @@ export function JobsView({
     const token = getToken();
     if (!token) { setShowTokenInput(true); return; }
 
-    const eligible = jobs.filter((j) => (j.score ?? 0) >= 60 && !j.isEnriched);
+    const eligible = jobs.filter((j) => !j.isEnriched);
     if (eligible.length === 0) return;
 
     setBulkRunning(true);
@@ -231,34 +231,33 @@ export function JobsView({
     setBulkRunning(false);
   }
 
-  // Normalise activeFilter: legacy "lead-status" / "enrichment" → "all"
-  const normalised = SUB_FILTERS.some((f) => f.value === activeFilter) ? activeFilter : "all";
+  const normalised = SORT_MODES.some((m) => m.value === activeSort) ? activeSort : "all";
 
-  const eligibleCount = jobs.filter((j) => (j.score ?? 0) >= 60 && !j.isEnriched).length;
+  const eligibleCount = jobs.filter((j) => !j.isEnriched).length;
 
   return (
     <div className="space-y-4">
       {/* Sub-filter chips + Enrich All row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex rounded-xl border border-amber-900/15 bg-white/50 p-1 backdrop-blur">
-          {SUB_FILTERS.map((f) => (
+          {SORT_MODES.map((m) => (
             <Link
-              key={f.value}
+              key={m.value}
               href={{
                 pathname: "/jobs",
                 query: {
-                  ...(f.value !== "all" ? { status: f.value } : {}),
+                  ...(m.value !== "all" ? { sort: m.value } : {}),
                   window: activeWindow,
                 },
               }}
               className={cn(
                 "rounded-lg px-3 py-1.5 text-sm transition",
-                normalised === f.value
+                normalised === m.value
                   ? "bg-gradient-to-r from-amber-700 to-orange-600 text-white shadow"
                   : "text-foreground/70 hover:text-foreground"
               )}
             >
-              {f.label}
+              {m.label}
             </Link>
           ))}
         </div>
@@ -393,7 +392,7 @@ export function JobsView({
                     <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
                       {enrichResults[job.id] ?? "Enriched"}
                     </span>
-                  ) : (job.score ?? 0) >= 60 ? (
+                  ) : (
                     <div className="flex flex-col gap-0.5">
                       <button
                         onClick={() => enrichOne(job)}
@@ -411,8 +410,6 @@ export function JobsView({
                         </span>
                       )}
                     </div>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
                   )}
                 </td>
               </tr>
@@ -426,7 +423,7 @@ export function JobsView({
         <div className="flex items-center justify-center gap-1">
           {currentPage > 1 && (
             <Link
-              href={{ pathname: "/jobs", query: { ...(normalised !== "all" ? { status: normalised } : {}), window: activeWindow, page: currentPage - 1 } }}
+              href={{ pathname: "/jobs", query: { ...(normalised !== "all" ? { sort: normalised } : {}), window: activeWindow, page: currentPage - 1 } }}
               className="rounded-lg border border-border/40 px-3 py-1.5 text-sm hover:bg-accent/20 transition"
             >
               ← Prev
@@ -437,7 +434,7 @@ export function JobsView({
           </span>
           {currentPage < totalPages && (
             <Link
-              href={{ pathname: "/jobs", query: { ...(normalised !== "all" ? { status: normalised } : {}), window: activeWindow, page: currentPage + 1 } }}
+              href={{ pathname: "/jobs", query: { ...(normalised !== "all" ? { sort: normalised } : {}), window: activeWindow, page: currentPage + 1 } }}
               className="rounded-lg border border-border/40 px-3 py-1.5 text-sm hover:bg-accent/20 transition"
             >
               Next →
