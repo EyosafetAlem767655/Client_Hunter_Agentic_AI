@@ -4,6 +4,8 @@ import { JobicyScraper } from "@/lib/scrapers/jobicy";
 import { RemotiveScraper } from "@/lib/scrapers/remotive";
 import { WwrDomScraper } from "@/lib/scrapers/wwr-dom";
 import { IndeedScraper } from "@/lib/scrapers/indeed";
+import { BaseScraper } from "@/lib/scrapers/base";
+import { LinkedInScraper } from "@/lib/scrapers/linkedin";
 import { scraperForSource, ENABLED_SOURCES } from "@/lib/scrapers";
 
 vi.mock("@/lib/utils", async (importOriginal) => {
@@ -376,6 +378,50 @@ describe("IndeedScraper", () => {
 
     const out = await new IndeedScraper("bot@example.com").fetch(10);
     expect(out).toEqual([]);
+  });
+});
+
+describe("LinkedInScraper", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("returns empty array gracefully when domain is blocked", async () => {
+    // BaseScraper.fetchWithRetry calls assertAllowedUrl which blocks linkedin.com.
+    // The scraper must catch the error and return [] rather than propagating.
+    const scraper = new LinkedInScraper("bot@example.com");
+    const result = await scraper.fetch(10);
+    expect(result).toEqual([]);
+  });
+
+  it("parses LinkedIn jobs HTML into postings", async () => {
+    const html = `<ul>
+      <li>
+        <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/111?trk=xyz"></a>
+        <h3 class="base-search-card__title">Virtual Assistant</h3>
+        <h4 class="base-search-card__subtitle">HealthCo</h4>
+        <span class="job-search-card__location">United States</span>
+      </li>
+      <li>
+        <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/222"></a>
+        <h3 class="base-search-card__title">Medical Receptionist</h3>
+        <h4 class="base-search-card__subtitle">MediCo</h4>
+        <span class="job-search-card__location">Remote</span>
+      </li>
+    </ul>`;
+
+    // Bypass assertAllowedUrl by mocking the protected method on the prototype
+    vi.spyOn(BaseScraper.prototype as never, "fetchWithRetry").mockResolvedValue({
+      text: async () => html,
+    } as unknown as Response);
+
+    const scraper = new LinkedInScraper("bot@example.com");
+    const result = await scraper.fetch(2);
+    expect(result).toHaveLength(2);
+    expect(result[0].source).toBe("linkedin");
+    expect(result[0].title).toBe("Virtual Assistant");
+    expect(result[0].company).toBe("HealthCo");
+    expect(result[0].url).toBe("https://www.linkedin.com/jobs/view/111");
+    expect(result[1].title).toBe("Medical Receptionist");
+    expect(result[1].company).toBe("MediCo");
   });
 });
 
