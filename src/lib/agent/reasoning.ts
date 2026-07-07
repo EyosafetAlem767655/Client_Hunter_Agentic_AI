@@ -169,6 +169,77 @@ async function processBatch(
   return { newMatches, processed, succeeded };
 }
 
+export interface SinglePostingAnalysis {
+  isRelevant: boolean;
+  score: number;
+  roleCategory: string | null;
+  fitReason: string | null;
+  estimatedSalaryRange: string | null;
+}
+
+/**
+ * Re-analyze ONE posting and persist the result. Unlike the batch pipeline this
+ * always calls the LLM fresh (no cache lookup) so a manual re-sync produces new,
+ * detailed reasoning against the latest description. Scoped to a single posting,
+ * so it can never re-queue the whole backlog.
+ */
+export async function analyzeSinglePosting(
+  posting: Posting,
+  options: FilterBatchOptions = {}
+): Promise<SinglePostingAnalysis> {
+  const [feedbackExamples, learnedRulesStr] = await Promise.all([
+    memory.getFeedbackExamples(),
+    memory.getSetting("prompt_learnings"),
+  ]);
+  const learnedRules = learnedRulesStr
+    ? (JSON.parse(learnedRulesStr) as PromptLearnings)
+    : undefined;
+
+  const raw = await callOpenAIJson<unknown>({
+    model: env.OPENAI_FILTER_MODEL,
+    system: SYSTEM_PROMPT,
+    user: buildFilterPrompt(
+      [
+        {
+          title: posting.title,
+          company: posting.company,
+          location: posting.location,
+          description: posting.description,
+        },
+      ],
+      feedbackExamples as FeedbackExample[],
+      learnedRules
+    ),
+    jsonSchema: filteredJobJsonSchema as Record<string, unknown>,
+    timeoutMs: options.llmTimeoutMs,
+    maxRetries: options.llmMaxRetries,
+  });
+
+  const parsed = parseFilteredBatch(raw);
+  const match = parsed?.results.find((r) => r.postingIndex === 0);
+  const job = match?.job ?? FALLBACK_FILTERED;
+
+  await memory.insertFilteredJob({
+    postingId: posting.id,
+    isRelevant: job.isRelevant,
+    score: Math.round(job.score),
+    roleCategory: job.roleCategory,
+    fitReason: job.fitReason,
+    suggestedRegions: job.suggestedRegions,
+    estimatedSalaryRange: job.estimatedSalaryRange,
+    llmModel: env.OPENAI_FILTER_MODEL,
+    promptVersion: PROMPT_VERSION,
+  });
+
+  return {
+    isRelevant: job.isRelevant,
+    score: Math.round(job.score),
+    roleCategory: job.roleCategory,
+    fitReason: job.fitReason,
+    estimatedSalaryRange: job.estimatedSalaryRange,
+  };
+}
+
 /** Run async tasks with a max concurrency. */
 export async function withConcurrency<T, R>(
   items: T[],

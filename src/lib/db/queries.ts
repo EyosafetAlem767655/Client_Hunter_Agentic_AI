@@ -110,6 +110,25 @@ export async function updateJobPostingDescription(id: number, description: strin
     .where(eq(jobPostings.id, id));
 }
 
+export async function getJobPostingById(id: number) {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      id: jobPostings.id,
+      source: jobPostings.source,
+      url: jobPostings.url,
+      title: jobPostings.title,
+      company: jobPostings.company,
+      location: jobPostings.location,
+      description: jobPostings.description,
+      scrapedAt: jobPostings.scrapedAt,
+    })
+    .from(jobPostings)
+    .where(eq(jobPostings.id, id))
+    .limit(1);
+  return row ?? null;
+}
+
 export async function getExistingExternalIds(
   source: string,
   externalIds: string[]
