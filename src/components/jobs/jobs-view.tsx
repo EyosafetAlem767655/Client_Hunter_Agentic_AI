@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { JobRow } from "./jobs-table";
@@ -189,15 +190,15 @@ function EnrichmentPanel({
 
   useEffect(() => { void load(); }, [load]);
 
-  // Auto-poll while Clay hasn't returned leads yet (status pending, no leads).
-  const status = data?.enrichment?.status;
+  // Right after the user enriches, poll for Clay's callback to deliver leads.
   const leadCount = data?.leads?.length ?? 0;
+  const justEnriched = !!triggerInfo?.sent;
   useEffect(() => {
-    if (status !== "pending" || leadCount > 0) return;
+    if (!justEnriched || leadCount > 0) return;
     const iv = setInterval(() => void load(), 5000);
     const stop = setTimeout(() => clearInterval(iv), 70_000);
     return () => { clearInterval(iv); clearTimeout(stop); };
-  }, [status, leadCount, load]);
+  }, [justEnriched, leadCount, load]);
 
   const enrichment = data?.enrichment;
   const rawData = (enrichment?.rawData ?? {}) as Record<string, unknown>;
@@ -207,7 +208,7 @@ function EnrichmentPanel({
     triggerInfo?.reasoning ||
     "";
   const leads = data?.leads ?? [];
-  const waiting = status === "pending" && leadCount === 0;
+  const waiting = justEnriched && leadCount === 0;
   const callbackUrl =
     typeof window !== "undefined"
       ? `${window.location.origin}/api/webhooks/clay`
@@ -610,6 +611,7 @@ export function JobsView({
   activeSort,
   activeWindow,
 }: JobsViewProps) {
+  const router = useRouter();
   const [jobs, setJobs] = useState<JobRow[]>(initialJobs);
   const [selected, setSelected] = useState<JobRow | null>(null);
 
@@ -680,6 +682,9 @@ export function JobsView({
         if (json.sent) {
           setJobs((prev) => prev.map((j) => j.id === job.id ? { ...j, isEnriched: true } : j));
           setSelected((prev) => prev?.id === job.id ? { ...prev, isEnriched: true } : prev);
+          // Re-sync server-rendered data (enriched badge, dashboard count) so the
+          // "outside" view matches without a manual reload.
+          router.refresh();
         }
       } else {
         setEnrichResults((prev) => ({ ...prev, [job.id]: `Error: ${json.error ?? "Unknown"}` }));

@@ -46,9 +46,9 @@ export async function POST(request: NextRequest) {
   try {
     const result = await findAndSendDomain(job.company, body.postingId);
 
-    // Record the attempt. "pending" while we wait for Clay's callback to post
-    // the enriched leads back; the /api/webhooks/clay receiver flips it to
-    // "complete" and saves the contacts.
+    // Once the domain is found and sent to Clay, our enrichment is done — mark it
+    // "complete" so it registers in the enriched badge + dashboard count right
+    // away. Clay's callback later merges the returned leads onto this same row.
     await saveCompanyEnrichment(body.postingId, {
       companyName: job.company,
       location: null,
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       staffCount: null,
       annualRevenue: null,
       facilitiesCount: null,
-      status: result.sent ? "pending" : "complete",
+      status: result.sent ? "complete" : "pending",
       rawData: {
         provider: "clay",
         domain: result.domain,
