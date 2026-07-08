@@ -5,6 +5,7 @@ import {
   updateJobPostingDescription,
 } from "@/lib/db/queries";
 import { fetchFullDescription } from "@/lib/scrapers/fetch-description";
+import { fetchJobDescriptionViaPython } from "@/lib/scrapers/job-description-python";
 import { callOpenAIJson } from "@/lib/llm/client";
 import { env } from "@/lib/env";
 
@@ -72,16 +73,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Job not found" }, { status: 404 });
   }
 
-  const full = await fetchFullDescription(job.url, job.source);
+  // 1) Headless-browser / TLS-impersonation scrape (Playwright → curl_cffi →
+  //    requests). This renders JS and bypasses Indeed/LinkedIn bot-detection, so
+  //    it pulls the whole description instead of the search-result snippet.
+  // 2) Fall back to the plain cheerio fetch if the Python scraper is unavailable.
+  // Both sources return clean text (Python via get_text with paragraph breaks,
+  // cheerio via .text()), so no further HTML stripping is needed here.
+  const viaPython = await fetchJobDescriptionViaPython(job.url);
+  const full = viaPython ?? (await fetchFullDescription(job.url, job.source));
   const currentLen = job.description?.length ?? 0;
 
   // Only accept a meaningfully fuller result — otherwise report that the source
-  // page couldn't be read (Indeed/LinkedIn often block automated fetches).
+  // page couldn't be read (some sites block automated access entirely).
   if (!full || full.length < 200 || full.length <= currentLen + 100) {
     return NextResponse.json({
       ok: false,
       error:
-        "Couldn't retrieve a fuller description from the source page — the site may block automated access (common for Indeed and LinkedIn). Open the original posting to read it.",
+        "Couldn't retrieve a fuller description from the source page — the site may block automated access. Open the original posting to read it.",
     });
   }
 
