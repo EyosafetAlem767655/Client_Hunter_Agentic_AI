@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import {
+  findEnrichmentPostingId,
   getEnrichmentDetail,
   saveCompanyEnrichment,
   saveEnrichedContacts,
@@ -59,10 +60,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
   }
 
-  const postingId = num(body.posting_id ?? body.postingId);
+  const company = (body.company as Record<string, unknown> | undefined) ?? body;
+
+  // Prefer the echoed posting_id; fall back to matching by domain/company so the
+  // callback still works if Clay's outgoing step doesn't map posting_id.
+  let postingId = num(body.posting_id ?? body.postingId);
+  if (!postingId) {
+    const domain = str(company.domain) ?? str(company.website);
+    const companyName = str(company.company_name) ?? str(company.companyName);
+    postingId = await findEnrichmentPostingId(domain, companyName);
+  }
   if (!postingId) {
     return NextResponse.json(
-      { ok: false, error: "posting_id is required to route the callback" },
+      { ok: false, error: "Could not route callback — include posting_id, or a domain/company_name that matches a pending enrichment" },
       { status: 400 }
     );
   }
@@ -81,7 +91,6 @@ export async function POST(request: Request) {
   // Flip the enrichment to complete, preserving the domain/reasoning captured at
   // trigger time and merging any company fields Clay returned.
   const { enrichment } = await getEnrichmentDetail(postingId);
-  const company = (body.company as Record<string, unknown> | undefined) ?? body;
   const prevRaw = (enrichment?.rawData as Record<string, unknown> | undefined) ?? {};
 
   await saveCompanyEnrichment(postingId, {

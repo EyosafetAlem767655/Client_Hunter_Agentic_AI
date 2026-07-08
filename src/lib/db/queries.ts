@@ -1433,6 +1433,42 @@ export async function saveEnrichedContacts(
   return saved;
 }
 
+/**
+ * Fallback correlation for the Clay callback when it doesn't echo posting_id:
+ * match the most recent pending enrichment by its chosen domain, else the most
+ * recent posting for the company name.
+ */
+export async function findEnrichmentPostingId(
+  domain: string | null,
+  companyName: string | null
+): Promise<number | null> {
+  const db = getDb();
+  if (domain) {
+    const [byDomain] = await db
+      .select({ postingId: companyEnrichments.postingId })
+      .from(companyEnrichments)
+      .where(
+        and(
+          eq(companyEnrichments.website, domain),
+          eq(companyEnrichments.status, "pending")
+        )
+      )
+      .orderBy(desc(companyEnrichments.updatedAt))
+      .limit(1);
+    if (byDomain?.postingId) return byDomain.postingId;
+  }
+  if (companyName) {
+    const [byCompany] = await db
+      .select({ id: jobPostings.id })
+      .from(jobPostings)
+      .where(sql`lower(${jobPostings.company}) = lower(${companyName})`)
+      .orderBy(desc(jobPostings.scrapedAt))
+      .limit(1);
+    if (byCompany?.id) return byCompany.id;
+  }
+  return null;
+}
+
 export async function getEnrichmentDetail(postingId: number): Promise<{
   enrichment: typeof companyEnrichments.$inferSelect | null;
   leads: Array<typeof contacts.$inferSelect>;

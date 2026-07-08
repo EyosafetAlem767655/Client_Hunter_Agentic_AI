@@ -208,6 +208,10 @@ function EnrichmentPanel({
     "";
   const leads = data?.leads ?? [];
   const waiting = status === "pending" && leadCount === 0;
+  const callbackUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/api/webhooks/clay`
+      : "/api/webhooks/clay";
 
   return (
     <section className="rounded-xl border border-emerald-900/15 bg-white/50 p-6">
@@ -302,11 +306,22 @@ function EnrichmentPanel({
         </div>
       ) : (
         domain && (
-          <p className="text-xs text-muted-foreground italic">
-            {waiting
-              ? "Waiting for Clay to return enriched leads… (auto-refreshing)"
-              : "No leads returned yet. Configure Clay to POST results back to /api/webhooks/clay, then Refresh."}
-          </p>
+          <div className="text-xs text-muted-foreground">
+            {waiting ? (
+              <p className="italic">Waiting for Clay to return enriched leads… (auto-refreshing)</p>
+            ) : (
+              <>
+                <p className="italic">
+                  No leads yet. Clay only <strong>pushes</strong> results back — it has no pull API for a
+                  webhook source. In your Clay table, add an outgoing “HTTP API” step that POSTs the enriched
+                  rows to this URL (header <code>x-clay-webhook-auth: &lt;CLAY_AUTH_TOKEN&gt;</code>), then Refresh:
+                </p>
+                <code className="mt-1 block break-all rounded bg-muted/50 px-2 py-1 text-[11px]">
+                  {callbackUrl}
+                </code>
+              </>
+            )}
+          </div>
         )
       )}
     </section>
@@ -612,6 +627,8 @@ export function JobsView({
   // Admin token prompt
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
+  // Job whose enrichment is waiting on the admin token — retried after Save.
+  const [pendingEnrichJob, setPendingEnrichJob] = useState<JobRow | null>(null);
 
   function getToken(): string {
     return typeof window !== "undefined" ? (sessionStorage.getItem(TOKEN_KEY) ?? "") : "";
@@ -622,11 +639,15 @@ export function JobsView({
     sessionStorage.setItem(TOKEN_KEY, tokenDraft.trim());
     setShowTokenInput(false);
     setTokenDraft("");
+    // Resume the action that triggered the prompt.
+    const j = pendingEnrichJob;
+    setPendingEnrichJob(null);
+    if (j) void enrichOne(j);
   }
 
   async function enrichOne(job: JobRow) {
     const token = getToken();
-    if (!token) { setShowTokenInput(true); return; }
+    if (!token) { setPendingEnrichJob(job); setShowTokenInput(true); return; }
 
     setEnrichingId(job.id);
     setEnrichResults((prev) => { const n = { ...prev }; delete n[job.id]; return n; });
@@ -952,6 +973,56 @@ export function JobsView({
           onFetchDescription={fetchFullDescriptionFor}
         />
       )}
+
+      {/* Admin-token prompt — its own portal at a higher z-index than the modal
+          (9999) so it's visible when triggered from inside the job detail view. */}
+      {showTokenInput && selected && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            onClick={() => { setShowTokenInput(false); setPendingEnrichJob(null); }}
+            style={{
+              position: "fixed", inset: 0, zIndex: 10000, display: "flex",
+              alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.55)",
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "hsl(36, 38%, 96%)", padding: "1.5rem", borderRadius: "0.9rem",
+                width: "min(90vw, 420px)", boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+              }}
+            >
+              <h3 className="text-base font-bold text-foreground">Admin token required</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Paste your <code>ADMIN_TOKEN</code> to run enrichment. It&apos;s stored for this session only.
+              </p>
+              <input
+                autoFocus
+                type="password"
+                value={tokenDraft}
+                onChange={(e) => setTokenDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveToken()}
+                placeholder="ADMIN_TOKEN"
+                className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
+              />
+              <div className="mt-3 flex justify-end gap-2">
+                <button
+                  onClick={() => { setShowTokenInput(false); setPendingEnrichJob(null); }}
+                  className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveToken}
+                  className="rounded-lg bg-amber-700 px-4 py-1.5 text-sm font-semibold text-white hover:bg-amber-800"
+                >
+                  Save &amp; enrich
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </>
   );
 }
