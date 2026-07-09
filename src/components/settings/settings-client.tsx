@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -52,6 +52,65 @@ interface RunResult {
   data?: Record<string, unknown>;
   error?: string;
   at: number;
+}
+
+// Bookmarklet that reads Indeed's embedded job-card JSON on the user's own
+// (Cloudflare-passed) tab and POSTs it to our ingest endpoint.
+function buildIndeedBookmarklet(origin: string, token: string): string {
+  const code =
+    "(function(){try{" +
+    "var m=window.mosaic&&window.mosaic.providerData&&window.mosaic.providerData['mosaic-provider-jobcards'];" +
+    "var r=(m&&m.metaData&&m.metaData.mosaicProviderJobCardsModel&&m.metaData.mosaicProviderJobCardsModel.results)||[];" +
+    "var jobs=r.map(function(j){return{jobkey:j.jobkey,title:j.displayTitle,company:j.company,city:j.jobLocationCity,state:j.jobLocationState,snippet:j.snippet,pubDate:j.pubDate};})" +
+    ".filter(function(j){return j.jobkey&&j.title;});" +
+    "if(!jobs.length){alert('No Indeed job cards found on this page. Let the results load, then click again.');return;}" +
+    "fetch('" + origin + "/api/ingest/indeed',{method:'POST',headers:{'Content-Type':'text/plain'}," +
+    "body:JSON.stringify({token:'" + token + "',jobs:jobs})})" +
+    ".then(function(x){return x.json();})" +
+    ".then(function(d){alert(d.ok?('TalentBridge: '+jobs.length+' sent, '+(d.inserted||0)+' new, '+(d.relevant||0)+' relevant.'):('TalentBridge error: '+(d.error||'unknown')));})" +
+    ".catch(function(e){alert('TalentBridge ingest failed: '+e);});" +
+    "}catch(e){alert('Bookmarklet error: '+e);}})();";
+  return "javascript:" + code;
+}
+
+function IndeedBookmarklet({ origin, token }: { origin: string; token: string }) {
+  const ref = useRef<HTMLAnchorElement>(null);
+  const code = token && origin ? buildIndeedBookmarklet(origin, token) : "";
+  // Set the javascript: href via the DOM — React strips javascript: URLs from href.
+  useEffect(() => {
+    if (ref.current && code) ref.current.setAttribute("href", code);
+  }, [code]);
+
+  if (!token) {
+    return (
+      <p className="text-xs text-amber-700">
+        Enter your ADMIN_TOKEN above first — it&apos;s baked into your personal ingest bookmarklet.
+      </p>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-amber-300/50 bg-amber-50/40 p-3 text-xs space-y-1.5">
+      <p className="font-medium text-amber-900">One-time setup — drag this to your bookmarks bar:</p>
+      <a
+        ref={ref}
+        onClick={(e) => e.preventDefault()}
+        className="inline-block cursor-move rounded-md border border-amber-400 bg-white px-3 py-1.5 font-semibold text-amber-800"
+      >
+        ⬇ Indeed → TalentBridge
+      </a>
+      <p className="text-muted-foreground">
+        Then click a position below → on the Indeed tab that opens, click this bookmarklet to pull the jobs in
+        (it scrapes your real session, so Cloudflare is happy).
+      </p>
+      <button
+        type="button"
+        onClick={() => void navigator.clipboard?.writeText(code)}
+        className="text-amber-700 underline"
+      >
+        or copy the bookmarklet code
+      </button>
+    </div>
+  );
 }
 
 export function SettingsClient({
@@ -113,6 +172,7 @@ export function SettingsClient({
         inserted?: number;
         durationMs?: number;
         error?: string;
+        opened?: boolean;
       }
     >
   >({});
@@ -494,23 +554,27 @@ export function SettingsClient({
     }
   }
 
-  // Scrape a SINGLE position (USA Remote) from one source, then filter it.
-  // Indeed opens the position's exact search in a new tab and waits 7 s (the
-  // page loads slowly) before the server scrapes that keyword in parallel.
+  // Indeed blocks server-side/headless scrapes (Cloudflare). Instead we open the
+  // position's search in the user's real browser tab; they click the ingest
+  // bookmarklet there, which reads the results and POSTs them to /api/ingest/indeed.
+  function openIndeedTab(position: JobPosition) {
+    const key = `indeed:${position.id}`;
+    window.open(position.indeedUrl, "_blank", "noopener,noreferrer");
+    setSiteScrapeState((prev) => ({ ...prev, [key]: { loading: false, ok: true, opened: true } }));
+    showToast("ok", `Opened ${position.label} — click the “Indeed → TalentBridge” bookmarklet on that tab.`);
+  }
+
+  // Scrape a SINGLE LinkedIn position (USA Remote), then filter it.
   async function scrapeOnePosition(source: "linkedin" | "indeed", position: JobPosition) {
     if (!token.trim()) {
       showToast("err", "Unauthorized — enter ADMIN_TOKEN first.");
       return;
     }
     const key = `${source}:${position.id}`;
+    // Indeed ingestion goes through the bookmarklet (openIndeedTab); this path is
+    // LinkedIn's server-side scrape.
     const query =
       source === "indeed" ? indeedQueryFromUrl(position.indeedUrl) : position.linkedinQuery;
-
-    if (source === "indeed") {
-      window.open(position.indeedUrl, "_blank", "noopener,noreferrer");
-      // Give the Indeed tab time to load in the user's real session.
-      await new Promise((r) => setTimeout(r, 7_000));
-    }
 
     setSiteScrapeState((prev) => ({ ...prev, [key]: { loading: true } }));
     try {
@@ -1022,15 +1086,21 @@ export function SettingsClient({
                   <span className="text-sm font-medium">{jobSourceLabel(source)} — scrape by position (USA Remote)</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Click a position to scrape just that role — the relevancy filter runs automatically after.
-                  {source === "indeed" && (
+                  {source === "indeed" ? (
                     <>
-                      {" "}
-                      <span className="text-amber-700/80 font-medium">Indeed</span> opens the position&apos;s
-                      search in a new tab (your real session) and waits ~7s before the server scrapes.
+                      Indeed blocks automated scraping (Cloudflare), so click a position to open its
+                      search in a new tab, then click the bookmarklet on that tab to pull the jobs in.
                     </>
+                  ) : (
+                    <>Click a position to scrape just that role — the relevancy filter runs automatically after.</>
                   )}
                 </p>
+                {source === "indeed" && (
+                  <IndeedBookmarklet
+                    origin={typeof window !== "undefined" ? window.location.origin : ""}
+                    token={token.trim()}
+                  />
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {JOB_POSITIONS.map((position) => {
                     const key = `${source}:${position.id}`;
@@ -1040,7 +1110,11 @@ export function SettingsClient({
                       <button
                         key={key}
                         disabled={!token.trim() || busy || loading !== null}
-                        onClick={() => void scrapeOnePosition(source, position)}
+                        onClick={() =>
+                          source === "indeed"
+                            ? openIndeedTab(position)
+                            : void scrapeOnePosition(source, position)
+                        }
                         className="flex flex-col items-start gap-1 rounded-lg border border-primary/20 bg-background/50 p-2.5 text-left hover:bg-primary/5 disabled:opacity-40 transition-colors"
                       >
                         <div className="flex items-center gap-1.5 text-sm font-medium">
@@ -1057,9 +1131,11 @@ export function SettingsClient({
                         </div>
                         {state && !busy && (
                           <span className="text-xs text-muted-foreground truncate w-full">
-                            {state.ok
-                              ? `${state.count ?? 0} found · ${state.inserted ?? 0} new${state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}`
-                              : (state.error ?? "Failed").slice(0, 42)}
+                            {state.opened
+                              ? "Opened — click the bookmarklet on the tab"
+                              : state.ok
+                                ? `${state.count ?? 0} found · ${state.inserted ?? 0} new${state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}`
+                                : (state.error ?? "Failed").slice(0, 42)}
                           </span>
                         )}
                       </button>
