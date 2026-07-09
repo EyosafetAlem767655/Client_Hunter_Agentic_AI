@@ -847,9 +847,9 @@ def scrape_indeed_playwright(sync_playwright, limit: int = 200, query: str | Non
                 page = ctx.new_page()
                 try:
                     page.goto(_indeed_url(q, query), wait_until="domcontentloaded", timeout=20000)
-                    # Indeed serves a Cloudflare interstitial first; give it up to
-                    # ~12 s to run its JS challenge and reveal the real results.
-                    for _ in range(12):
+                    # Indeed serves a Cloudflare interstitial first; give it a few
+                    # seconds to run its JS challenge and reveal the real results.
+                    for _ in range(8):
                         try:
                             if "mosaic-provider-jobcards" in page.content() or page.query_selector(
                                 ".job_seen_beacon, [data-testid='slider_item']"
@@ -869,17 +869,18 @@ def scrape_indeed_playwright(sync_playwright, limit: int = 200, query: str | Non
 
 
 def scrape_indeed(limit: int = 200, query: str | None = None) -> tuple[list[dict[str, Any]], str]:
-    # Prefer the headless browser — it runs Cloudflare's JS challenge, so it
-    # doesn't hit the flat 403 that plain HTTP (curl_cffi) gets. curl_cffi stays
-    # as a fallback for when browser binaries aren't installed.
+    # curl_cffi (Chrome TLS impersonation) first — it's the only engine that has
+    # ever gotten past Indeed. Headless Playwright is kept as a fallback, but
+    # Cloudflare's JS challenge reliably blocks automated browsers, so it rarely
+    # yields anything. Both returning empty means Indeed is blocking us.
+    jobs = scrape_indeed_requests(limit, query)
+    if jobs:
+        return jobs, "requests"
     sync_playwright = _try_playwright_import()
     if sync_playwright:
         jobs = scrape_indeed_playwright(sync_playwright, limit, query)
         if jobs:
             return jobs, "playwright"
-    jobs = scrape_indeed_requests(limit, query)
-    if jobs:
-        return jobs, "requests"
     return [], "none"
 
 

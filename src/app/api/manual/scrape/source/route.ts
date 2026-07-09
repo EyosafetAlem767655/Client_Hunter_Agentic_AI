@@ -128,8 +128,27 @@ export async function POST(request: Request) {
   const origin = `${proto}://${host}`;
 
   try {
-    // Prefer Python Playwright scraper — falls back to TS on any failure
+    // Prefer the Python scraper (curl_cffi / Playwright). Fall back to the TS
+    // scraper only where it can actually work.
     const pythonPostings = await tryPythonScraper(source, origin, query);
+
+    // Indeed's TS scraper is a plain HTTP fetch, which Cloudflare answers with a
+    // 403. Retrying it after Python came back empty just turned "no results" into
+    // a confusing "HTTP 403" error, so skip it and report the block plainly.
+    if (!pythonPostings && source === "indeed") {
+      return NextResponse.json({
+        ok: false,
+        source,
+        label,
+        count: 0,
+        inserted: 0,
+        engine: "blocked",
+        durationMs: Date.now() - start,
+        error:
+          "Indeed blocked the automated request (Cloudflare bot check) — nothing scraped. The block is usually temporary; try again later.",
+      });
+    }
+
     const raw = pythonPostings ?? (await scraper.fetch(200, query));
 
     const filtered = filterVaPostings(raw);
@@ -141,7 +160,7 @@ export async function POST(request: Request) {
       fetched: raw.length,
       count: scraped,
       inserted,
-      engine: pythonPostings ? "playwright" : "typescript",
+      engine: pythonPostings ? "python" : "typescript",
       durationMs: Date.now() - start,
     });
   } catch (error) {
