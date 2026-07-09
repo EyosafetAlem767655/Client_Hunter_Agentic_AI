@@ -114,6 +114,7 @@ export function CloseCrmTab() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const [showNewLead, setShowNewLead]     = useState(false);
+  const [showImport, setShowImport]       = useState(false);
   const [showNewContact, setShowNewContact] = useState(false);
   const [showNewNote, setShowNewNote]     = useState(false);
   const [showNewOpp, setShowNewOpp]       = useState(false);
@@ -194,7 +195,7 @@ export function CloseCrmTab() {
 
   // ── CRUD helpers ──────────────────────────────────────────────────────────
 
-  async function api<T>(method: string, url: string, body?: unknown): Promise<T> {
+  async function api<T>(url: string, method: string, body?: unknown): Promise<T> {
     const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
@@ -252,10 +253,17 @@ export function CloseCrmTab() {
               className="flex-1 min-w-48 rounded-lg border border-border/40 bg-white/70 px-3 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30"
             />
             <button
-              onClick={() => setShowNewLead(true)}
+              onClick={() => { setShowNewLead((v) => !v); setShowImport(false); }}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition"
             >
               + New Lead
+            </button>
+            <button
+              onClick={() => { setShowImport((v) => !v); setShowNewLead(false); }}
+              className="rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50 transition"
+              title="Bulk-add leads from a Cleanlist / Sendr / Clay export"
+            >
+              ⬆ Import CSV
             </button>
           </div>
 
@@ -275,6 +283,15 @@ export function CloseCrmTab() {
                 } finally { setSaving(false); }
               }}
               saving={saving}
+            />
+          )}
+
+          {/* Bulk import from an enrichment export */}
+          {showImport && (
+            <CsvImportPanel
+              statuses={statuses}
+              onClose={() => setShowImport(false)}
+              onImported={() => void fetchLeads(search, skip)}
             />
           )}
 
@@ -512,6 +529,231 @@ function NewLeadForm({
         </button>
         <button onClick={onClose} className="rounded-lg border border-border/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground transition">Cancel</button>
       </div>
+    </div>
+  );
+}
+
+// ─── CSV / Excel Import ───────────────────────────────────────────────────────
+
+interface ImportContact {
+  name: string;
+  title?: string;
+  email?: string;
+  phone?: string;
+  linkedinUrl?: string;
+}
+
+interface ImportLead {
+  company: string;
+  website?: string;
+  description?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  contacts: ImportContact[];
+}
+
+interface ParseResult {
+  leads: ImportLead[];
+  mapped: Record<string, string>;
+  unmapped: string[];
+  rowCount: number;
+  skippedRows: number;
+  warnings: string[];
+}
+
+interface ImportRowResult {
+  company: string;
+  ok: boolean;
+  action?: "created" | "merged";
+  contactsAdded?: number;
+  error?: string;
+}
+
+/** Matches MAX_LEADS_PER_CALL on the server. */
+const IMPORT_CHUNK = 25;
+
+function CsvImportPanel({
+  statuses, onClose, onImported,
+}: {
+  statuses: CloseStatus[];
+  onClose: () => void;
+  onImported: () => void;
+}) {
+  const [parsed, setParsed]     = useState<ParseResult | null>(null);
+  const [fileName, setFileName] = useState("");
+  const [statusId, setStatusId] = useState("");
+  const [busy, setBusy]         = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [error, setError]       = useState<string | null>(null);
+  const [results, setResults]   = useState<ImportRowResult[] | null>(null);
+
+  async function onFile(file: File) {
+    setBusy(true); setError(null); setParsed(null); setResults(null); setProgress(null);
+    setFileName(file.name);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/crm/close/import/parse", { method: "POST", body: form });
+      const json = await res.json() as ParseResult & { error?: string };
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      setParsed(json);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not read that file");
+    } finally { setBusy(false); }
+  }
+
+  async function runImport() {
+    if (!parsed) return;
+    setBusy(true); setError(null); setResults(null);
+    const collected: ImportRowResult[] = [];
+    try {
+      for (let i = 0; i < parsed.leads.length; i += IMPORT_CHUNK) {
+        const chunk = parsed.leads.slice(i, i + IMPORT_CHUNK);
+        setProgress(`Importing ${i + 1}–${Math.min(i + chunk.length, parsed.leads.length)} of ${parsed.leads.length}…`);
+        const res = await fetch("/api/crm/close/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ leads: chunk, statusId: statusId || undefined }),
+        });
+        const json = await res.json() as { results?: ImportRowResult[]; error?: string };
+        if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+        collected.push(...(json.results ?? []));
+      }
+      setResults(collected);
+      setProgress(null);
+      onImported();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Import failed");
+      if (collected.length > 0) setResults(collected);
+      setProgress(null);
+    } finally { setBusy(false); }
+  }
+
+  const contactTotal = parsed?.leads.reduce((n, l) => n + l.contacts.length, 0) ?? 0;
+  const created = results?.filter((r) => r.action === "created").length ?? 0;
+  const merged  = results?.filter((r) => r.action === "merged").length ?? 0;
+  const failed  = results?.filter((r) => !r.ok) ?? [];
+
+  return (
+    <div className="rounded-lg border border-blue-200/60 bg-blue-50/30 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wide text-blue-800">Import leads from CSV / Excel</p>
+        <button onClick={onClose} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Upload an export from Cleanlist, Sendr, Clay or Apollo. Columns are matched by name
+        (Company, Company website, Full name, Job title, Find Email, Phone, LinkedIn URL…) and
+        rows sharing a company become one lead with several contacts.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="cursor-pointer rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 transition">
+          {fileName || "Choose .csv or .xlsx…"}
+          <input
+            type="file"
+            accept=".csv,.xlsx,.xls,text/csv"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }}
+          />
+        </label>
+        {statuses.length > 0 && (
+          <select value={statusId} onChange={(e) => setStatusId(e.target.value)}
+            className="rounded-lg border border-border/40 bg-white px-2 py-1.5 text-xs outline-none">
+            <option value="">Default lead status</option>
+            {statuses.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+        )}
+      </div>
+
+      {busy && !progress && <p className="text-xs text-muted-foreground">Reading file…</p>}
+      {progress && <p className="text-xs text-blue-700">{progress}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+
+      {/* Preview */}
+      {parsed && !results && (
+        <div className="space-y-2">
+          <p className="text-xs text-foreground/80">
+            <strong>{parsed.leads.length}</strong> lead{parsed.leads.length !== 1 ? "s" : ""} ·{" "}
+            <strong>{contactTotal}</strong> contact{contactTotal !== 1 ? "s" : ""} from {parsed.rowCount} row
+            {parsed.rowCount !== 1 ? "s" : ""}
+            {parsed.skippedRows > 0 && ` · ${parsed.skippedRows} row(s) skipped (no company)`}
+          </p>
+
+          {parsed.warnings.map((w) => (
+            <p key={w} className="rounded border border-amber-300/60 bg-amber-50 px-2 py-1 text-xs text-amber-800">⚠ {w}</p>
+          ))}
+
+          {parsed.unmapped.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Ignored columns: {parsed.unmapped.slice(0, 8).join(", ")}
+              {parsed.unmapped.length > 8 && ` +${parsed.unmapped.length - 8} more`}
+            </p>
+          )}
+
+          <div className="max-h-56 overflow-y-auto rounded-lg border border-border/30 bg-white/70">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-blue-50/80 text-left">
+                <tr>
+                  <th className="px-2 py-1 font-medium">Company</th>
+                  <th className="px-2 py-1 font-medium">Website</th>
+                  <th className="px-2 py-1 font-medium">Contacts</th>
+                </tr>
+              </thead>
+              <tbody>
+                {parsed.leads.slice(0, 50).map((l) => (
+                  <tr key={l.company} className="border-t border-border/20 align-top">
+                    <td className="px-2 py-1 font-medium">{l.company}</td>
+                    <td className="px-2 py-1 truncate text-muted-foreground max-w-40">{l.website ?? "—"}</td>
+                    <td className="px-2 py-1">
+                      {l.contacts.length === 0 ? (
+                        <span className="text-muted-foreground">none</span>
+                      ) : (
+                        l.contacts.map((c, i) => (
+                          <div key={i} className="truncate">
+                            {c.name}
+                            {c.title && <span className="text-muted-foreground"> · {c.title}</span>}
+                            {c.email && <span className="text-amber-700"> · {c.email}</span>}
+                          </div>
+                        ))
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {parsed.leads.length > 50 && (
+            <p className="text-xs text-muted-foreground">Showing the first 50 — all {parsed.leads.length} will be imported.</p>
+          )}
+
+          <button
+            disabled={busy || parsed.leads.length === 0}
+            onClick={() => void runImport()}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition"
+          >
+            {busy ? "Importing…" : `Import ${parsed.leads.length} lead${parsed.leads.length !== 1 ? "s" : ""} into Close`}
+          </button>
+        </div>
+      )}
+
+      {/* Outcome */}
+      {results && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-green-700">
+            {created} created · {merged} merged into existing leads
+            {failed.length > 0 && <span className="text-red-600"> · {failed.length} failed</span>}
+          </p>
+          {failed.slice(0, 10).map((r) => (
+            <p key={r.company} className="text-xs text-red-600">{r.company}: {r.error}</p>
+          ))}
+          <button onClick={onClose} className="rounded-lg border border-border/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground transition">
+            Done
+          </button>
+        </div>
+      )}
     </div>
   );
 }

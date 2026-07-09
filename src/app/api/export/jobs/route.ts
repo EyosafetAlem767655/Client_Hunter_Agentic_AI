@@ -14,8 +14,9 @@ export const runtime = "nodejs";
 const MAX_ROWS = 5_000;
 
 const COLUMNS: ExportColumn[] = [
-  { key: "title", header: "Title" },
   { key: "company", header: "Company" },
+  { key: "title", header: "Job Title" },
+  { key: "description", header: "Job Description" },
   { key: "source", header: "Source" },
   { key: "score", header: "Score" },
   { key: "isRelevant", header: "Relevant" },
@@ -27,8 +28,20 @@ const COLUMNS: ExportColumn[] = [
   { key: "isEnriched", header: "Enriched" },
 ];
 
+// Excel refuses to open a workbook holding a cell longer than this.
+const MAX_CELL_CHARS = 32_000;
+
 type Item = {
-  posting: { id: number; title: string; company: string; source: string; location: string; url: string; scrapedAt: Date };
+  posting: {
+    id: number;
+    title: string;
+    company: string;
+    source: string;
+    location: string;
+    url: string;
+    description: string | null;
+    scrapedAt: Date;
+  };
   filtered?: { score: number; isRelevant: boolean; roleCategory: string | null; fitReason: string | null } | null;
   isEnriched?: boolean;
 };
@@ -55,8 +68,9 @@ export async function GET(request: Request) {
   });
 
   const rows: ExportRow[] = (items as Item[]).map((it) => ({
-    title: it.posting.title,
     company: it.posting.company,
+    title: it.posting.title,
+    description: (it.posting.description ?? "").slice(0, MAX_CELL_CHARS),
     source: jobSourceLabel(it.posting.source as Parameters<typeof jobSourceLabel>[0]),
     score: it.filtered?.score ?? "",
     isRelevant: it.filtered ? it.filtered.isRelevant : "",
