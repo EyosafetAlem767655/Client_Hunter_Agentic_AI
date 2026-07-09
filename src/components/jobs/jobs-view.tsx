@@ -599,6 +599,7 @@ interface JobsViewProps {
   totalPages: number;
   activeSort: string;
   activeWindow: string;
+  activeStatus?: string;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -610,6 +611,7 @@ export function JobsView({
   totalPages,
   activeSort,
   activeWindow,
+  activeStatus = "all",
 }: JobsViewProps) {
   const router = useRouter();
   const [jobs, setJobs] = useState<JobRow[]>(initialJobs);
@@ -822,6 +824,22 @@ export function JobsView({
             {!bulkRunning && bulkProgress && (
               <span className="text-xs font-medium text-emerald-700">{bulkProgress}</span>
             )}
+
+            {/* Export the rows matching the current filters */}
+            <a
+              href={`/api/export/jobs?format=csv&status=${activeStatus}&sort=${normalised}&window=${activeWindow}`}
+              className="rounded-lg border border-amber-700/30 bg-amber-700/10 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-700/20 transition"
+              title="Download the jobs matching your current filters as CSV"
+            >
+              ⬇ CSV
+            </a>
+            <a
+              href={`/api/export/jobs?format=xlsx&status=${activeStatus}&sort=${normalised}&window=${activeWindow}`}
+              className="rounded-lg border border-amber-700/30 bg-amber-700/10 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-700/20 transition"
+              title="Download the jobs matching your current filters as an Excel workbook"
+            >
+              ⬇ Excel
+            </a>
           </div>
         </div>
 

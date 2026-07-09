@@ -2,6 +2,7 @@ import Link from "next/link";
 import { JobsView, type JobRow } from "@/components/jobs/jobs-view";
 import { FeedbackTab, type FeedbackEntry } from "@/components/jobs/feedback-tab";
 import { CloseCrmTab } from "@/components/jobs/close-crm-tab";
+import { LeadsExportTab } from "@/components/jobs/leads-export-tab";
 import { DbErrorBanner } from "@/components/dashboard/db-error-banner";
 import { listJobsPaginated, listAllFeedback, getSetting } from "@/lib/db/queries";
 import { jobSourceLabel } from "@/lib/job-sources";
@@ -14,9 +15,10 @@ type JobListItem = {
 };
 
 const TABS: Array<{ key: string; label: string; statuses: string[] }> = [
-  { key: "jobs",     label: "Jobs",      statuses: ["all", "relevant", "unfiltered", "lead-status", "enrichment"] },
-  { key: "crm",      label: "Close CRM", statuses: ["crm"] },
-  { key: "feedback", label: "Feedback",  statuses: ["feedback"] },
+  { key: "jobs",     label: "Jobs",         statuses: ["all", "relevant", "unfiltered", "lead-status", "enrichment"] },
+  { key: "leads",    label: "Leads → Close", statuses: ["leads"] },
+  { key: "crm",      label: "Close CRM",    statuses: ["crm"] },
+  { key: "feedback", label: "Feedback",     statuses: ["feedback"] },
 ];
 
 const WINDOWS: Array<{ value: string; label: string }> = [
@@ -189,8 +191,11 @@ export default async function JobsPage({
           totalPages={totalPages}
           activeSort={activeSort}
           activeWindow={activeWindow}
+          activeStatus={activeStatus}
         />
       )}
+      {!error && activeTabKey === "leads" && <LeadsExportTab />}
+
       {!error && activeTabKey === "crm" && <CloseCrmTab />}
       {!error && activeTabKey === "feedback" && (
         <FeedbackTab entries={feedbackEntries} lastTrainedAt={lastTrainedAt} />

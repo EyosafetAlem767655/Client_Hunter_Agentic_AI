@@ -1485,6 +1485,89 @@ export async function findEnrichmentPostingId(
   return null;
 }
 
+export interface LeadExportRow {
+  postingId: number;
+  jobTitle: string;
+  jobUrl: string;
+  score: number | null;
+  companyName: string | null;
+  website: string | null;
+  location: string | null;
+  staffCount: number | null;
+  annualRevenue: string | null;
+  practiceSize: string | null;
+  closeLeadStatus: string | null;
+  contactName: string | null;
+  contactTitle: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  contactUrl: string | null;
+}
+
+/**
+ * Enriched leads flattened for export: ONE ROW PER CONTACT (a lead with no
+ * contacts still yields one row with blank contact columns). Close's importer
+ * groups repeated rows into a single lead by the Company column.
+ */
+export async function listLeadsForExport(
+  postingIds?: number[]
+): Promise<LeadExportRow[]> {
+  const db = getDb();
+  const where = and(
+    eq(companyEnrichments.status, "complete"),
+    visiblePostingSource(),
+    postingIds && postingIds.length > 0
+      ? inArray(jobPostings.id, postingIds)
+      : undefined
+  );
+
+  const rows = await db
+    .select({
+      postingId: jobPostings.id,
+      jobTitle: jobPostings.title,
+      jobUrl: jobPostings.url,
+      jobCompany: jobPostings.company,
+      score: filteredJobs.score,
+      companyName: companyEnrichments.companyName,
+      website: companyEnrichments.website,
+      location: companyEnrichments.location,
+      staffCount: companyEnrichments.staffCount,
+      annualRevenue: companyEnrichments.annualRevenue,
+      practiceSize: companyEnrichments.practiceSize,
+      closeLeadStatus: companyEnrichments.closeLeadStatus,
+      contactName: contacts.name,
+      contactTitle: contacts.title,
+      contactEmail: contacts.email,
+      contactPhone: contacts.phone,
+      contactUrl: contacts.contactUrl,
+    })
+    .from(companyEnrichments)
+    .innerJoin(jobPostings, eq(jobPostings.id, companyEnrichments.postingId))
+    .leftJoin(filteredJobs, eq(filteredJobs.postingId, jobPostings.id))
+    // Only join contacts that carry something reachable — placeholder rows would
+    // otherwise emit duplicate, blank-contact lines into the Close import.
+    .leftJoin(
+      contacts,
+      and(
+        eq(contacts.postingId, jobPostings.id),
+        notInArray(contacts.sourceType, NON_CONTACT_SOURCE_TYPES),
+        or(
+          isNotNull(contacts.email),
+          isNotNull(contacts.phone),
+          isNotNull(contacts.contactUrl)
+        )
+      )
+    )
+    .where(where)
+    .orderBy(desc(filteredJobs.score), desc(jobPostings.id));
+
+  return rows.map((r) => ({
+    ...r,
+    // Fall back to the scraped company name when enrichment didn't resolve one.
+    companyName: r.companyName ?? r.jobCompany,
+  }));
+}
+
 export async function getEnrichmentDetail(postingId: number): Promise<{
   enrichment: typeof companyEnrichments.$inferSelect | null;
   leads: Array<typeof contacts.$inferSelect>;
