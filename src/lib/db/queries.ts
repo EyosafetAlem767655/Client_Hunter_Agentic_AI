@@ -101,6 +101,22 @@ export async function getJobPostingById(id: number) {
   return row ?? null;
 }
 
+/** Normalized (title, company) key used to collapse near-duplicate listings. */
+export function titleCompanyKey(title: string, company: string): string {
+  return `${title.trim().toLowerCase()}${company.trim().toLowerCase()}`;
+}
+
+/** All (title, company) keys already stored — for near-duplicate ingest dedup. */
+export async function getAllTitleCompanyKeys(): Promise<Set<string>> {
+  const db = getDb();
+  const rows = await db
+    .select({ title: jobPostings.title, company: jobPostings.company })
+    .from(jobPostings);
+  const keys = new Set<string>();
+  for (const r of rows) keys.add(titleCompanyKey(r.title, r.company));
+  return keys;
+}
+
 export async function getExistingExternalIds(
   source: string,
   externalIds: string[]

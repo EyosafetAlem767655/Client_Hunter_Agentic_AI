@@ -806,6 +806,15 @@ def scrape_indeed_requests(limit: int = 200, query: str | None = None) -> list[d
     return jobs
 
 
+# Trim the most obvious headless-automation tells before Indeed's page scripts run.
+_STEALTH_JS = """
+Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
+Object.defineProperty(navigator,'languages',{get:()=>['en-US','en']});
+Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});
+window.chrome={runtime:{}};
+"""
+
+
 def scrape_indeed_playwright(sync_playwright, limit: int = 200, query: str | None = None) -> list[dict[str, Any]]:
     priority = _indeed_queries(query) if query else [
         "medical+receptionist", "patient+coordinator",
@@ -818,29 +827,38 @@ def scrape_indeed_playwright(sync_playwright, limit: int = 200, query: str | Non
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
         )
         try:
             ctx = browser.new_context(
                 user_agent=BROWSER_UA,
+                locale="en-US",
+                viewport={"width": 1366, "height": 900},
                 extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
             )
-            ctx.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-            )
+            ctx.add_init_script(_STEALTH_JS)
             for q in priority:
                 if len(jobs) >= limit:
                     break
                 page = ctx.new_page()
                 try:
-                    page.goto(
-                        _indeed_url(q, query),
-                        wait_until="domcontentloaded",
-                        timeout=18000,
-                    )
-                    page.wait_for_timeout(2500)
-                    html = page.content()
-                    jobs.extend(_parse_indeed_page(html, seen))
+                    page.goto(_indeed_url(q, query), wait_until="domcontentloaded", timeout=20000)
+                    # Indeed serves a Cloudflare interstitial first; give it up to
+                    # ~12 s to run its JS challenge and reveal the real results.
+                    for _ in range(12):
+                        try:
+                            if "mosaic-provider-jobcards" in page.content() or page.query_selector(
+                                ".job_seen_beacon, [data-testid='slider_item']"
+                            ):
+                                break
+                        except Exception:
+                            pass
+                        page.wait_for_timeout(1000)
+                    jobs.extend(_parse_indeed_page(page.content(), seen))
                 except Exception:
                     pass
                 finally:
@@ -851,15 +869,17 @@ def scrape_indeed_playwright(sync_playwright, limit: int = 200, query: str | Non
 
 
 def scrape_indeed(limit: int = 200, query: str | None = None) -> tuple[list[dict[str, Any]], str]:
-    jobs = scrape_indeed_requests(limit, query)
-    if jobs:
-        return jobs, "requests"
-    # Requests got blocked — try Playwright
+    # Prefer the headless browser — it runs Cloudflare's JS challenge, so it
+    # doesn't hit the flat 403 that plain HTTP (curl_cffi) gets. curl_cffi stays
+    # as a fallback for when browser binaries aren't installed.
     sync_playwright = _try_playwright_import()
     if sync_playwright:
         jobs = scrape_indeed_playwright(sync_playwright, limit, query)
         if jobs:
             return jobs, "playwright"
+    jobs = scrape_indeed_requests(limit, query)
+    if jobs:
+        return jobs, "requests"
     return [], "none"
 
 

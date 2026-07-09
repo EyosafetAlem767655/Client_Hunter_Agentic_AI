@@ -50,6 +50,13 @@ vi.mock("@/lib/agent/memory", () => ({
   },
 }));
 
+// ingestPostings reads existing title+company keys for near-duplicate dedup —
+// stub it (no DB in unit tests); keep the real pure titleCompanyKey.
+vi.mock("@/lib/db/queries", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/queries")>();
+  return { ...actual, getAllTitleCompanyKeys: vi.fn().mockResolvedValue(new Set<string>()) };
+});
+
 vi.mock("@/lib/agent/observability", () => ({
   logEvent: vi.fn().mockResolvedValue(undefined),
 }));

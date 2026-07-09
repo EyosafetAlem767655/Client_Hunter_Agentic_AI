@@ -2,6 +2,7 @@ import { runNodeScrapers } from "@/lib/scraper/node-runner";
 import { runPythonScrapers } from "@/lib/scraper/python-client";
 import { jobSourceLabel } from "@/lib/job-sources";
 import type { RawPosting, ScrapeSourceStatus } from "@/types";
+import { getAllTitleCompanyKeys, titleCompanyKey } from "@/lib/db/queries";
 import { filterNewPostings, memory } from "./memory";
 import { logEvent } from "./observability";
 import { filterVaPostings } from "./va-filter";
@@ -11,19 +12,33 @@ type Engine = "node" | "python";
 export async function ingestPostings(
   postings: RawPosting[]
 ): Promise<{ scraped: number; inserted: number; postingIds: number[] }> {
-  // Count genuinely-new postings for the `inserted` stat, but upsert *every*
-  // scraped posting so re-encountered jobs get their scrapedAt refreshed
-  // (upsertJobPosting's onConflictDoUpdate sets scrapedAt = now). That replaces
-  // the old row with the freshly-scraped one and keeps it inside the 24h window.
+  // Existing rows are re-upserted so a re-encountered job (same external_id) gets
+  // its scrapedAt refreshed. New rows are only inserted if they aren't a
+  // near-duplicate of an existing job (same normalized title + company) — job
+  // boards repost the same role under many different ids, and we don't want the
+  // same job showing up multiple times in the list.
   const novelIds = new Set(
     (await filterNewPostings(postings)).map((p) => p.externalId)
   );
+  const existingKeys = await getAllTitleCompanyKeys();
+
   const postingIds: number[] = [];
+  let inserted = 0;
   for (const posting of postings) {
+    const key = titleCompanyKey(posting.title, posting.company);
+    const isNovel = novelIds.has(posting.externalId);
+
+    // A brand-new listing that duplicates an existing job → skip it entirely.
+    if (isNovel && existingKeys.has(key)) continue;
+
     const row = await memory.upsertJobPosting(posting);
     if (row?.id) postingIds.push(row.id);
+    if (isNovel) {
+      inserted++;
+      existingKeys.add(key); // also collapses duplicates within this same batch
+    }
   }
-  return { scraped: postings.length, inserted: novelIds.size, postingIds };
+  return { scraped: postings.length, inserted, postingIds };
 }
 
 function pickEngine(): Engine {
