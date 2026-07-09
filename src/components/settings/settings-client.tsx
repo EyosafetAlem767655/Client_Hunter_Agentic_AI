@@ -25,6 +25,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ENABLED_SOURCES, jobSourceLabel } from "@/lib/job-sources";
+import { JOB_POSITIONS, indeedQueryFromUrl, type JobPosition } from "@/lib/scrapers/positions";
 
 const TOKEN_KEY = "talentbridge_admin_token";
 
@@ -493,6 +494,75 @@ export function SettingsClient({
     }
   }
 
+  // Scrape a SINGLE position (USA Remote) from one source, then filter it.
+  // Indeed opens the position's exact search in a new tab and waits 7 s (the
+  // page loads slowly) before the server scrapes that keyword in parallel.
+  async function scrapeOnePosition(source: "linkedin" | "indeed", position: JobPosition) {
+    if (!token.trim()) {
+      showToast("err", "Unauthorized — enter ADMIN_TOKEN first.");
+      return;
+    }
+    const key = `${source}:${position.id}`;
+    const query =
+      source === "indeed" ? indeedQueryFromUrl(position.indeedUrl) : position.linkedinQuery;
+
+    if (source === "indeed") {
+      window.open(position.indeedUrl, "_blank", "noopener,noreferrer");
+      // Give the Indeed tab time to load in the user's real session.
+      await new Promise((r) => setTimeout(r, 7_000));
+    }
+
+    setSiteScrapeState((prev) => ({ ...prev, [key]: { loading: true } }));
+    try {
+      const res = await fetch("/api/manual/scrape/source", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token.trim()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ source, query }),
+      });
+      const data: {
+        ok?: boolean;
+        count?: number;
+        inserted?: number;
+        durationMs?: number;
+        error?: string;
+      } = await res.json().catch(() => ({}));
+      const ok = data.ok ?? false;
+      setSiteScrapeState((prev) => ({
+        ...prev,
+        [key]: {
+          loading: false,
+          ok,
+          count: data.count ?? 0,
+          inserted: data.inserted ?? 0,
+          durationMs: data.durationMs,
+          error: data.error,
+        },
+      }));
+      if (ok) {
+        showToast("ok", `${position.label}: ${data.count ?? 0} found, ${data.inserted ?? 0} new — filtering…`);
+      } else {
+        showToast("err", `${position.label} failed: ${data.error ?? "Unknown error"}`);
+      }
+      // Relevancy filter (source-scoped) — scores + saves this position's new jobs.
+      setLoading("Filter");
+      try {
+        const filter = await runFilterLoop(source);
+        showToast("ok", `${position.label}: filter done — ${filter.relevant} new relevant`);
+      } catch (e) {
+        showToast("err", `Filter failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+      } finally {
+        setLoading(null);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Request failed";
+      setSiteScrapeState((prev) => ({ ...prev, [key]: { loading: false, ok: false, error: msg } }));
+      showToast("err", `${position.label} failed: ${msg}`);
+    }
+  }
+
   async function runManual(
     path: string,
     label: string,
@@ -944,51 +1014,60 @@ export function SettingsClient({
             <CardTitle>Manual triggers</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            {/* Per-site Playwright scrape buttons — primary scraping interface */}
-            <div className="rounded-xl border border-primary/20 bg-background/30 p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Search className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">Scrape by site</span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Click a site to scrape — filter runs automatically after.{" "}
-                <span className="text-amber-700/80 font-medium">Indeed</span> opens in your browser tab (uses your real session) while the server scrapes in parallel.
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {ENABLED_SOURCES.map((source) => {
-                  const state = siteScrapeState[source];
-                  const busy = state?.loading ?? false;
-                  return (
-                    <button
-                      key={source}
-                      disabled={!token.trim() || busy || loading !== null}
-                      onClick={() => void scrapeOneSite(source)}
-                      className="flex flex-col items-start gap-1 rounded-lg border border-primary/20 bg-background/50 p-2.5 text-left hover:bg-primary/5 disabled:opacity-40 transition-colors"
-                    >
-                      <div className="flex items-center gap-1.5 text-sm font-medium">
-                        {busy ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
-                        ) : state?.ok === true ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                        ) : state?.ok === false ? (
-                          <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
-                        ) : (
-                          <Play className="h-3.5 w-3.5 text-primary shrink-0" />
+            {/* Per-position scrape tables — one per source, scraped one at a time */}
+            {(["linkedin", "indeed"] as const).map((source) => (
+              <div key={source} className="rounded-xl border border-primary/20 bg-background/30 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Search className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">{jobSourceLabel(source)} — scrape by position (USA Remote)</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Click a position to scrape just that role — the relevancy filter runs automatically after.
+                  {source === "indeed" && (
+                    <>
+                      {" "}
+                      <span className="text-amber-700/80 font-medium">Indeed</span> opens the position&apos;s
+                      search in a new tab (your real session) and waits ~7s before the server scrapes.
+                    </>
+                  )}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {JOB_POSITIONS.map((position) => {
+                    const key = `${source}:${position.id}`;
+                    const state = siteScrapeState[key];
+                    const busy = state?.loading ?? false;
+                    return (
+                      <button
+                        key={key}
+                        disabled={!token.trim() || busy || loading !== null}
+                        onClick={() => void scrapeOnePosition(source, position)}
+                        className="flex flex-col items-start gap-1 rounded-lg border border-primary/20 bg-background/50 p-2.5 text-left hover:bg-primary/5 disabled:opacity-40 transition-colors"
+                      >
+                        <div className="flex items-center gap-1.5 text-sm font-medium">
+                          {busy ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                          ) : state?.ok === true ? (
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                          ) : state?.ok === false ? (
+                            <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                          ) : (
+                            <Play className="h-3.5 w-3.5 text-primary shrink-0" />
+                          )}
+                          <span className="truncate">{position.label}</span>
+                        </div>
+                        {state && !busy && (
+                          <span className="text-xs text-muted-foreground truncate w-full">
+                            {state.ok
+                              ? `${state.count ?? 0} found · ${state.inserted ?? 0} new${state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}`
+                              : (state.error ?? "Failed").slice(0, 42)}
+                          </span>
                         )}
-                        <span className="truncate">{jobSourceLabel(source)}</span>
-                      </div>
-                      {state && !busy && (
-                        <span className="text-xs text-muted-foreground truncate w-full">
-                          {state.ok
-                            ? `${state.count ?? 0} found · ${state.inserted ?? 0} new${state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}`
-                            : (state.error ?? "Failed").slice(0, 42)}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            ))}
 
             {/* Pipeline controls */}
             <div className="grid gap-3 sm:grid-cols-2">

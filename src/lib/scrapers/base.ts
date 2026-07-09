@@ -42,7 +42,8 @@ export abstract class BaseScraper {
     void contactEmail;
   }
 
-  abstract fetch(limit: number): Promise<RawPosting[]>;
+  // `query`, when provided, restricts the scrape to a single keyword/position.
+  abstract fetch(limit: number, query?: string): Promise<RawPosting[]>;
 
   async fetchWithinBudget(
     limit: number,

@@ -21,13 +21,15 @@ export class LinkedInScraper extends BaseScraper {
     this.acceptHeader = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
   }
 
-  async fetch(limit: number): Promise<RawPosting[]> {
+  async fetch(limit: number, query?: string): Promise<RawPosting[]> {
     const seen = new Set<string>();
     const all: RawPosting[] = [];
+    // Single-position scrape when a keyword is passed; otherwise sweep all titles.
+    const queries: readonly string[] = query ? [query] : QUERIES;
 
-    for (const query of QUERIES) {
+    for (const q of queries) {
       if (all.length >= limit) break;
-      const encoded = encodeURIComponent(query);
+      const encoded = encodeURIComponent(q);
 
       for (const { param, pageStarts } of LOCATION_VARIANTS) {
         if (all.length >= limit) break;
@@ -84,7 +86,8 @@ export class LinkedInScraper extends BaseScraper {
     }
 
     // ── Second round: "virtual assistant" USA remote (10 s cool-down) ──
-    if (all.length < limit) {
+    // Skipped for single-position scrapes — those want only their keyword.
+    if (!query && all.length < limit) {
       await sleep(10_000);
       const vaEncoded = encodeURIComponent("virtual assistant");
       for (const start of [0, 10, 20]) {

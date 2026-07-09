@@ -15,7 +15,7 @@ export const runtime = "nodejs";
 
 // ── Local dev: spawn Python as a subprocess (Python endpoints only run on Vercel)
 
-function tryPythonSubprocess(source: string): Promise<RawPosting[] | null> {
+function tryPythonSubprocess(source: string, query?: string): Promise<RawPosting[] | null> {
   const scriptPath = path.join(process.cwd(), "api", "py", "scrape_jobs.py");
   return new Promise<RawPosting[] | null>((resolve) => {
     let stdout = "";
@@ -27,7 +27,8 @@ function tryPythonSubprocess(source: string): Promise<RawPosting[] | null> {
       resolve(result);
     };
     const timer = setTimeout(() => { proc.kill(); finish(null); }, 55_000);
-    const proc = spawn("python", [scriptPath, source], {
+    const args = query ? [scriptPath, source, query] : [scriptPath, source];
+    const proc = spawn("python", args, {
       cwd: process.cwd(),
       env: { ...process.env },
     });
@@ -50,7 +51,8 @@ function tryPythonSubprocess(source: string): Promise<RawPosting[] | null> {
 
 async function tryPythonVercel(
   source: JobSource,
-  origin: string
+  origin: string,
+  query?: string
 ): Promise<RawPosting[] | null> {
   const secret = process.env.CRON_SECRET ?? process.env.ADMIN_TOKEN ?? "";
   try {
@@ -60,7 +62,7 @@ async function tryPythonVercel(
         "Content-Type": "application/json",
         Authorization: `Bearer ${secret}`,
       },
-      body: JSON.stringify({ source }),
+      body: JSON.stringify(query ? { source, query } : { source }),
       signal: AbortSignal.timeout(52_000),
     });
     if (!res.ok) return null;
@@ -75,13 +77,14 @@ async function tryPythonVercel(
 
 async function tryPythonScraper(
   source: JobSource,
-  origin: string
+  origin: string,
+  query?: string
 ): Promise<RawPosting[] | null> {
   if (process.env.VERCEL !== "1") {
     // Local dev: spawn Python directly — the /api/py endpoint is Vercel-only
-    return tryPythonSubprocess(source);
+    return tryPythonSubprocess(source, query);
   }
-  return tryPythonVercel(source, origin);
+  return tryPythonVercel(source, origin, query);
 }
 
 export async function POST(request: Request) {
@@ -89,7 +92,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { source?: string } = {};
+  let body: { source?: string; query?: string } = {};
   try {
     body = await request.json();
   } catch {
@@ -97,6 +100,7 @@ export async function POST(request: Request) {
   }
 
   const source = body.source as JobSource | undefined;
+  const query = typeof body.query === "string" && body.query.trim() ? body.query.trim() : undefined;
   if (!source || !ENABLED_SOURCES.includes(source)) {
     return NextResponse.json(
       { error: `Unknown or disabled source: ${source}` },
@@ -125,8 +129,8 @@ export async function POST(request: Request) {
 
   try {
     // Prefer Python Playwright scraper — falls back to TS on any failure
-    const pythonPostings = await tryPythonScraper(source, origin);
-    const raw = pythonPostings ?? (await scraper.fetch(200));
+    const pythonPostings = await tryPythonScraper(source, origin, query);
+    const raw = pythonPostings ?? (await scraper.fetch(200, query));
 
     const filtered = filterVaPostings(raw);
     const { scraped, inserted } = await ingestPostings(filtered);

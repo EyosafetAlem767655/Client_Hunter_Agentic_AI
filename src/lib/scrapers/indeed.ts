@@ -19,12 +19,14 @@ export class IndeedScraper extends BaseScraper {
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8";
   }
 
-  async fetch(limit: number): Promise<RawPosting[]> {
+  async fetch(limit: number, query?: string): Promise<RawPosting[]> {
     const out: RawPosting[] = [];
-    for (const query of SEARCH_QUERIES) {
+    // Single-position scrape when a keyword is passed; otherwise sweep all titles.
+    const queries = query ? [query.trim().replace(/\s+/g, "+")] : SEARCH_QUERIES;
+    for (const q of queries) {
       if (out.length >= limit) break;
       const url =
-        `https://www.indeed.com/jobs?q=${query}&l=USA&from=${FROM_PARAM}&sort=date&fromage=1`;
+        `https://www.indeed.com/jobs?q=${q}&l=USA&from=${FROM_PARAM}&sort=date&fromage=1`;
       const parsed = new URL(url);
       if (!(await this.respectRobots(parsed.origin, parsed.pathname + parsed.search))) continue;
 
@@ -48,7 +50,8 @@ export class IndeedScraper extends BaseScraper {
       await this.paginatedJitter();
     }
     // ── Second round: "virtual assistant" USA remote (10 s cool-down) ──
-    if (out.length < limit) {
+    // Skipped for single-position scrapes — those want only their keyword.
+    if (!query && out.length < limit) {
       await sleep(10_000);
       const vaUrl = `https://www.indeed.com/jobs?q=virtual+assistant&l=USA&from=${FROM_PARAM}&sort=date&fromage=1`;
       const parsed = new URL(vaUrl);

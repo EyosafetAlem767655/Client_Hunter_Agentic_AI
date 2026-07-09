@@ -333,8 +333,8 @@ def scrape_hn(limit: int = 100) -> tuple[list[dict[str, Any]], str]:
 
 # ── LinkedIn (public guest API — no auth required) ────────────────────────────
 
-def scrape_linkedin(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
-    queries = [
+def scrape_linkedin(limit: int = 200, query: str | None = None) -> tuple[list[dict[str, Any]], str]:
+    queries = [query.strip().replace(" ", "+")] if query else [
         "medical+receptionist", "front+desk+receptionist", "front+office+coordinator",
         "patient+service+representative", "patient+access+representative",
         "appointment+scheduler", "scheduling+coordinator",
@@ -738,7 +738,19 @@ def _parse_indeed_page(html: str, seen: set[str]) -> list[dict[str, Any]]:
     return jobs
 
 
-def scrape_indeed_requests(limit: int = 200) -> list[dict[str, Any]]:
+# Single-position search (USA, most recent first).
+_INDEED_QUERY_URL = "https://www.indeed.com/jobs?q={q}&l=USA&sort=date"
+
+
+def _indeed_queries(query: str | None) -> list[str]:
+    return [query.strip().replace(" ", "+")] if query else _INDEED_QUERIES
+
+
+def _indeed_url(q: str, query: str | None) -> str:
+    return _INDEED_QUERY_URL.format(q=q) if query else _INDEED_URL.format(q=q)
+
+
+def scrape_indeed_requests(limit: int = 200, query: str | None = None) -> list[dict[str, Any]]:
     seen: set[str] = set()
     jobs: list[dict[str, Any]] = []
 
@@ -751,11 +763,11 @@ def scrape_indeed_requests(limit: int = 200) -> list[dict[str, Any]]:
     except Exception:
         pass
 
-    for q in _INDEED_QUERIES:
+    for q in _indeed_queries(query):
         if len(jobs) >= limit:
             break
         try:
-            url = _INDEED_URL.format(q=q)
+            url = _indeed_url(q, query)
             if _cffi_session is not None:
                 r = _cffi_session.get(
                     url, headers=HTTP_HEADERS, timeout=14, allow_redirects=True
@@ -772,8 +784,8 @@ def scrape_indeed_requests(limit: int = 200) -> list[dict[str, Any]]:
     return jobs
 
 
-def scrape_indeed_playwright(sync_playwright, limit: int = 200) -> list[dict[str, Any]]:
-    priority = [
+def scrape_indeed_playwright(sync_playwright, limit: int = 200, query: str | None = None) -> list[dict[str, Any]]:
+    priority = _indeed_queries(query) if query else [
         "medical+receptionist", "patient+coordinator",
         "prior+authorization+specialist", "medical+biller",
         "insurance+verification+specialist", "medical+administrative+assistant",
@@ -800,7 +812,7 @@ def scrape_indeed_playwright(sync_playwright, limit: int = 200) -> list[dict[str
                 page = ctx.new_page()
                 try:
                     page.goto(
-                        _INDEED_URL.format(q=q),
+                        _indeed_url(q, query),
                         wait_until="domcontentloaded",
                         timeout=18000,
                     )
@@ -816,14 +828,14 @@ def scrape_indeed_playwright(sync_playwright, limit: int = 200) -> list[dict[str
     return jobs
 
 
-def scrape_indeed(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
-    jobs = scrape_indeed_requests(limit)
+def scrape_indeed(limit: int = 200, query: str | None = None) -> tuple[list[dict[str, Any]], str]:
+    jobs = scrape_indeed_requests(limit, query)
     if jobs:
         return jobs, "requests"
     # Requests got blocked — try Playwright
     sync_playwright = _try_playwright_import()
     if sync_playwright:
-        jobs = scrape_indeed_playwright(sync_playwright, limit)
+        jobs = scrape_indeed_playwright(sync_playwright, limit, query)
         if jobs:
             return jobs, "playwright"
     return [], "none"
@@ -831,7 +843,7 @@ def scrape_indeed(limit: int = 200) -> tuple[list[dict[str, Any]], str]:
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
-def scrape_source(source: str) -> tuple[list[dict[str, Any]], str]:
+def scrape_source(source: str, query: str | None = None) -> tuple[list[dict[str, Any]], str]:
     if source == "remotive":
         return scrape_remotive()
     if source == "jobicy":
@@ -841,9 +853,9 @@ def scrape_source(source: str) -> tuple[list[dict[str, Any]], str]:
     if source == "hn":
         return scrape_hn()
     if source == "linkedin":
-        return scrape_linkedin()
+        return scrape_linkedin(query=query)
     if source == "indeed":
-        return scrape_indeed()
+        return scrape_indeed(query=query)
     return [], "none"
 
 
@@ -867,9 +879,10 @@ class handler(BaseHTTPRequestHandler):
         if source not in VALID_SOURCES:
             self._respond(400, {"error": f"Unknown source: {source!r}. Valid: {sorted(VALID_SOURCES)}"})
             return
+        query = (payload.get("query") or "").strip() or None
 
         try:
-            jobs, engine = scrape_source(source)
+            jobs, engine = scrape_source(source, query)
             self._respond(200, {"ok": True, "jobs": jobs, "engine": engine, "count": len(jobs)})
         except Exception as exc:
             self._respond(500, {"ok": False, "error": str(exc)[:300]})
@@ -887,11 +900,12 @@ class handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     import sys
     src = sys.argv[1] if len(sys.argv) > 1 else ""
+    cli_query = sys.argv[2] if len(sys.argv) > 2 else None
     if src not in VALID_SOURCES:
         print(json.dumps({"ok": False, "error": f"Unknown source: {src!r}"}))
         sys.exit(1)
     try:
-        found, eng = scrape_source(src)
+        found, eng = scrape_source(src, cli_query)
         print(json.dumps({"ok": True, "jobs": found, "engine": eng, "count": len(found)}))
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)[:300]}))
