@@ -348,54 +348,76 @@ def scrape_linkedin(limit: int = 200, query: str | None = None) -> tuple[list[di
         "accounts+receivable+medical", "claims+processor+medical",
         "revenue+cycle+specialist", "referral+coordinator", "dental+receptionist",
     ]
+    import time
+
     seen: set[str] = set()
     jobs: list[dict[str, Any]] = []
+
+    # The LinkedIn guest API returns ~10 cards per page and paginates by `start`.
+    # Fetching only start=0 (the old behaviour) capped every query at ~10 jobs, so
+    # walk the pages until one adds nothing (end of results) — up to ~150 per query.
+    starts = list(range(0, 150, 10))
 
     for q in queries:
         if len(jobs) >= limit:
             break
-        try:
-            # f_WT=2 = remote work type, f_TPR=r604800 = past week
-            url = (
-                "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
-                f"?keywords={q}&location=United+States&f_WT=2&f_TPR=r604800&start=0"
-            )
-            r = _get(url, timeout=12)
-            r.raise_for_status()
-            soup = BeautifulSoup(r.text, "html.parser")
+        empty_streak = 0
+        for start in starts:
+            if len(jobs) >= limit:
+                break
+            try:
+                # f_WT=2 = remote work type, f_TPR=r604800 = past week
+                url = (
+                    "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+                    f"?keywords={q}&location=United+States&f_WT=2&f_TPR=r604800&start={start}"
+                )
+                r = _get(url, timeout=12)
+                r.raise_for_status()
+                soup = BeautifulSoup(r.text, "html.parser")
 
-            for li in soup.select("li"):
-                if len(jobs) >= limit:
-                    break
-                link = li.select_one("a.base-card__full-link")
-                if not link:
-                    continue
-                href = (link.get("href") or "").split("?")[0].strip()
-                if not href or "linkedin.com/jobs/view/" not in href:
-                    continue
-                if href in seen:
-                    continue
-                seen.add(href)
+                added = 0
+                for li in soup.select("li"):
+                    if len(jobs) >= limit:
+                        break
+                    link = li.select_one("a.base-card__full-link")
+                    if not link:
+                        continue
+                    href = (link.get("href") or "").split("?")[0].strip()
+                    if not href or "linkedin.com/jobs/view/" not in href:
+                        continue
+                    if href in seen:
+                        continue
+                    seen.add(href)
 
-                title_el = li.select_one("h3.base-search-card__title")
-                company_el = li.select_one("h4.base-search-card__subtitle")
-                loc_el = li.select_one(".job-search-card__location")
+                    title_el = li.select_one("h3.base-search-card__title")
+                    company_el = li.select_one("h4.base-search-card__subtitle")
+                    loc_el = li.select_one(".job-search-card__location")
 
-                title = title_el.get_text(strip=True) if title_el else ""
-                company = company_el.get_text(strip=True) if company_el else ""
-                location = loc_el.get_text(strip=True) if loc_el else "Remote"
+                    title = title_el.get_text(strip=True) if title_el else ""
+                    company = company_el.get_text(strip=True) if company_el else ""
+                    location = loc_el.get_text(strip=True) if loc_el else "Remote"
 
-                if not title:
-                    continue
-                jobs.append(_job(
-                    source="linkedin",
-                    url=href,
-                    title=title,
-                    company=company,
-                    location=location,
-                ))
-        except Exception:
-            pass
+                    if not title:
+                        continue
+                    jobs.append(_job(
+                        source="linkedin",
+                        url=href,
+                        title=title,
+                        company=company,
+                        location=location,
+                    ))
+                    added += 1
+
+                # Two consecutive pages with no new cards → end of this query's results.
+                if added == 0:
+                    empty_streak += 1
+                    if empty_streak >= 2:
+                        break
+                else:
+                    empty_streak = 0
+                    time.sleep(0.4)  # be polite between pages
+            except Exception:
+                break
     return jobs, "requests"
 
 
