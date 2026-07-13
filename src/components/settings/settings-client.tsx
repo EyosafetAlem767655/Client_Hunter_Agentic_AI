@@ -495,8 +495,13 @@ export function SettingsClient({
   }
 
   // Scrape a SINGLE position (USA Remote) from one source, then filter it.
-  // Indeed opens the position's exact search in a new tab and waits 7 s (the
-  // page loads slowly) before the server scrapes that keyword in parallel.
+  //
+  // Indeed used to pop its search into a tab here and wait 7 s. That never did
+  // anything: the tab is a session in *this* browser, while the scrape runs in
+  // Python on the server, with its own cookies — so a check cleared in the tab
+  // was invisible to the scraper. The server now drives its own Chromium window
+  // and rides out Cloudflare's ~15 s check there, which is the session that has
+  // to be clear. Expect an Indeed run to take ~20 s cold, ~10 s once warm.
   async function scrapeOnePosition(source: "linkedin" | "indeed", position: JobPosition) {
     if (!token.trim()) {
       showToast("err", "Unauthorized — enter ADMIN_TOKEN first.");
@@ -505,12 +510,6 @@ export function SettingsClient({
     const key = `${source}:${position.id}`;
     const query =
       source === "indeed" ? indeedQueryFromUrl(position.indeedUrl) : position.linkedinQuery;
-
-    if (source === "indeed") {
-      window.open(position.indeedUrl, "_blank", "noopener,noreferrer");
-      // Give the Indeed tab time to load in the user's real session.
-      await new Promise((r) => setTimeout(r, 7_000));
-    }
 
     setSiteScrapeState((prev) => ({ ...prev, [key]: { loading: true } }));
     try {

@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 
@@ -70,6 +71,22 @@ def _try_playwright_import():
         return sync_playwright
     except Exception:
         return None
+
+
+def _log(message: str) -> None:
+    """Progress goes to stderr — stdout carries the JSON payload."""
+    print(message, file=sys.stderr, flush=True)
+
+
+def _can_open_browser() -> bool:
+    """Whether we can put a real browser window on screen.
+
+    Never on Vercel: a serverless host has no display, and nobody is sitting
+    there to click through a challenge. Set INDEED_BROWSER=0 to opt out locally.
+    """
+    if os.environ.get("VERCEL") == "1":
+        return False
+    return os.environ.get("INDEED_BROWSER", "1") != "0"
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -815,8 +832,53 @@ window.chrome={runtime:{}};
 """
 
 
-def scrape_indeed_playwright(sync_playwright, limit: int = 200, query: str | None = None) -> list[dict[str, Any]]:
-    priority = _indeed_queries(query) if query else [
+# Chromium profile that keeps Indeed's Cloudflare cookies (`cf_clearance`) between
+# runs, so a challenge cleared once isn't re-armed on every scrape.
+_INDEED_PROFILE_DIR = os.path.join(os.getcwd(), ".playwright", "indeed")
+
+# Ceiling on how long to sit on the search page waiting for the Cloudflare check
+# to clear. Measured at 13-15s, so a hard 15s cutoff flakes; we wait longer but
+# return the instant job cards appear, so the common case still costs ~14s.
+_INDEED_VERIFY_WAIT = int(os.environ.get("INDEED_VERIFY_WAIT", "45"))
+
+# Job cards. Their presence is what tells us the challenge is behind us.
+_INDEED_CARDS = ".job_seen_beacon, [data-testid='slider_item']"
+
+
+def _page_html(page, attempts: int = 5) -> str:
+    """page.content() throws while the challenge page is mid-redirect. Retry."""
+    for _ in range(attempts):
+        try:
+            return page.content()
+        except Exception:
+            page.wait_for_timeout(500)
+    return ""
+
+
+def scrape_indeed_playwright(
+    sync_playwright,
+    limit: int = 200,
+    query: str | None = None,
+    verify_wait: int = _INDEED_VERIFY_WAIT,
+) -> list[dict[str, Any]]:
+    """Scrape Indeed through a real, on-screen Chromium.
+
+    Indeed fronts its results with a Cloudflare check that takes ~13-15s to
+    clear. Two things about it drive this design:
+
+      * It will not clear in a headless browser. Headless gets served a flat
+        "Blocked - Indeed.com" even when the profile already holds a valid
+        `cf_clearance` cookie, so the window has to be real and on screen.
+      * The challenge page redirects itself while it works, which makes
+        page.content() raise. Polling content() (what we used to do) therefore
+        looked like "no jobs found" rather than "still loading" — and with only
+        an 8s budget it gave up ~5s before the page was ever going to be ready.
+        Waiting on the job-card selector instead rides out the redirects.
+
+    Usually nobody has to touch the window. If Cloudflare does escalate to a
+    click-through, it's on screen and the wait is long enough to solve it by hand.
+    """
+    queries = _indeed_queries(query) if query else [
         "medical+receptionist", "patient+coordinator",
         "prior+authorization+specialist", "medical+biller",
         "insurance+verification+specialist", "medical+administrative+assistant",
@@ -824,64 +886,69 @@ def scrape_indeed_playwright(sync_playwright, limit: int = 200, query: str | Non
     seen: set[str] = set()
     jobs: list[dict[str, Any]] = []
 
+    os.makedirs(_INDEED_PROFILE_DIR, exist_ok=True)
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-            ],
+        # Everything here is deliberately minimal — each thing we used to "help"
+        # with is a Cloudflare tell, and adding any of them back pins the page on
+        # "Just a moment..." forever (all verified against the live site):
+        #   * user_agent=BROWSER_UA — claims macOS while the browser is really
+        #     Windows/Linux, and Cloudflare cross-checks UA against the platform.
+        #   * _STEALTH_JS — patching navigator.webdriver is itself detectable.
+        #   * --no-sandbox / --disable-dev-shm-usage — classic automation flags.
+        # A stock Chromium, left alone, clears the check on its own in ~15s.
+        ctx = p.chromium.launch_persistent_context(
+            user_data_dir=_INDEED_PROFILE_DIR,
+            headless=False,
+            viewport={"width": 1366, "height": 900},
+            args=["--disable-blink-features=AutomationControlled"],
         )
         try:
-            ctx = browser.new_context(
-                user_agent=BROWSER_UA,
-                locale="en-US",
-                viewport={"width": 1366, "height": 900},
-                extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
-            )
-            ctx.add_init_script(_STEALTH_JS)
-            for q in priority:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+
+            for i, q in enumerate(queries):
                 if len(jobs) >= limit:
                     break
-                page = ctx.new_page()
                 try:
-                    page.goto(_indeed_url(q, query), wait_until="domcontentloaded", timeout=20000)
-                    # Indeed serves a Cloudflare interstitial first; give it a few
-                    # seconds to run its JS challenge and reveal the real results.
-                    for _ in range(8):
-                        try:
-                            if "mosaic-provider-jobcards" in page.content() or page.query_selector(
-                                ".job_seen_beacon, [data-testid='slider_item']"
-                            ):
-                                break
-                        except Exception:
-                            pass
-                        page.wait_for_timeout(1000)
-                    jobs.extend(_parse_indeed_page(page.content(), seen))
+                    page.goto(_indeed_url(q, query), wait_until="domcontentloaded", timeout=30_000)
+                    if i == 0:
+                        _log(
+                            f"Indeed: waiting up to {verify_wait}s for the verification check "
+                            f"to clear. If it asks you to click something, do it in the "
+                            f"browser window that just opened."
+                        )
+                    page.wait_for_selector(_INDEED_CARDS, timeout=verify_wait * 1000)
+                    jobs.extend(_parse_indeed_page(_page_html(page), seen))
                 except Exception:
-                    pass
-                finally:
-                    page.close()
+                    # This query didn't come through; the next one may still.
+                    _log(f"Indeed: no results for {q!r} (page title: {page.title()[:40]!r})")
         finally:
-            browser.close()
+            ctx.close()
     return jobs
 
 
 def scrape_indeed(limit: int = 200, query: str | None = None) -> tuple[list[dict[str, Any]], str]:
-    # curl_cffi (Chrome TLS impersonation) first — it's the only engine that has
-    # ever gotten past Indeed. Headless Playwright is kept as a fallback, but
-    # Cloudflare's JS challenge reliably blocks automated browsers, so it rarely
-    # yields anything. Both returning empty means Indeed is blocking us.
+    """Real browser first; curl_cffi only where we can't open one.
+
+    The browser MUST go first. curl_cffi gets a 403 + CAPTCHA whenever the
+    Cloudflare check is armed, and that failed request arms it harder against
+    this IP — so the browser we opened right afterwards was being held on the
+    challenge because of our own probe. Trying the "cheap" path first was
+    poisoning the path that actually works, on every run and on any IP.
+
+    A browser needs a display, so on Vercel curl_cffi is all there is. When the
+    check is armed there, Indeed simply cannot be scraped server-side; run it
+    locally, where the window can open.
+    """
+    if _can_open_browser():
+        sync_playwright = _try_playwright_import()
+        if sync_playwright:
+            jobs = scrape_indeed_playwright(sync_playwright, limit, query)
+            if jobs:
+                return jobs, "playwright"
+
     jobs = scrape_indeed_requests(limit, query)
-    if jobs:
-        return jobs, "requests"
-    sync_playwright = _try_playwright_import()
-    if sync_playwright:
-        jobs = scrape_indeed_playwright(sync_playwright, limit, query)
-        if jobs:
-            return jobs, "playwright"
-    return [], "none"
+    return (jobs, "requests") if jobs else ([], "none")
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────

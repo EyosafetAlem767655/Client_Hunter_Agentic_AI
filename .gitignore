@@ -37,3 +37,7 @@ next-env.d.ts
 
 # drizzle
 drizzle/meta
+.env*
+
+# Chromium profile holding Indeed's Cloudflare clearance cookie
+.playwright/

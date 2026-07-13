@@ -132,10 +132,11 @@ export async function POST(request: Request) {
     // scraper only where it can actually work.
     const pythonPostings = await tryPythonScraper(source, origin, query);
 
-    // Indeed's TS scraper is a plain HTTP fetch, which Cloudflare answers with a
-    // 403. Retrying it after Python came back empty just turned "no results" into
-    // a confusing "HTTP 403" error, so skip it and report the block plainly.
+    // Indeed's TS scraper is a plain HTTP fetch that Cloudflare answers with a
+    // 403; running it after Python came up empty just turned "no results" into a
+    // misleading "HTTP 403". Report what actually happened instead.
     if (!pythonPostings && source === "indeed") {
+      const onVercel = process.env.VERCEL === "1";
       return NextResponse.json({
         ok: false,
         source,
@@ -144,8 +145,9 @@ export async function POST(request: Request) {
         inserted: 0,
         engine: "blocked",
         durationMs: Date.now() - start,
-        error:
-          "Indeed blocked the automated request (Cloudflare bot check) — nothing scraped. The block is usually temporary; try again later.",
+        error: onVercel
+          ? "Indeed can't be scraped from the server: clearing its Cloudflare check needs a real browser window, and there's no display on Vercel. Run the app locally to scrape Indeed."
+          : "Indeed's Cloudflare check didn't clear. A Chromium window should have opened — if it asked you to verify, run this again and complete the check in that window.",
       });
     }
 
