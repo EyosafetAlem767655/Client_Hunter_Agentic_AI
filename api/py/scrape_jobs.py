@@ -350,21 +350,19 @@ def scrape_hn(limit: int = 100) -> tuple[list[dict[str, Any]], str]:
 
 # ── LinkedIn (public guest API — no auth required) ────────────────────────────
 
-def scrape_linkedin(limit: int = 200, query: str | None = None) -> tuple[list[dict[str, Any]], str]:
+def scrape_linkedin(
+    limit: int = 200,
+    query: str | None = None,
+    location: str = "United States",
+) -> tuple[list[dict[str, Any]], str]:
     queries = [query.strip().replace(" ", "+")] if query else [
-        "medical+receptionist", "front+desk+receptionist", "front+office+coordinator",
-        "patient+service+representative", "patient+access+representative",
-        "appointment+scheduler", "scheduling+coordinator",
-        "patient+coordinator", "patient+care+coordinator",
-        "patient+intake+specialist", "intake+coordinator",
-        "medical+administrative+assistant", "medical+office+assistant",
-        "medical+secretary", "medical+records+clerk", "health+information+clerk",
-        "data+entry+clerk+medical", "insurance+verification+specialist",
-        "eligibility+benefits+verification", "prior+authorization+specialist",
-        "authorization+coordinator", "medical+biller", "medical+billing+specialist",
-        "accounts+receivable+medical", "claims+processor+medical",
-        "revenue+cycle+specialist", "referral+coordinator", "dental+receptionist",
+        "front+end+developer", "backend+developer", "full+stack+developer",
+        "software+engineer", "AI+engineer", "machine+learning+engineer",
+        "AI+automation+specialist", "MERN+stack+developer",
+        "data+scientist", "data+analyst",
     ]
+    # LinkedIn's guest API keys results off the location string (US/UK/Canada).
+    loc_param = (location or "United States").strip().replace(" ", "+")
     import time
 
     seen: set[str] = set()
@@ -386,7 +384,7 @@ def scrape_linkedin(limit: int = 200, query: str | None = None) -> tuple[list[di
                 # f_WT=2 = remote work type, f_TPR=r604800 = past week
                 url = (
                     "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
-                    f"?keywords={q}&location=United+States&f_WT=2&f_TPR=r604800&start={start}"
+                    f"?keywords={q}&location={loc_param}&f_WT=2&f_TPR=r604800&start={start}"
                 )
                 r = _get(url, timeout=12)
                 r.raise_for_status()
@@ -953,7 +951,11 @@ def scrape_indeed(limit: int = 200, query: str | None = None) -> tuple[list[dict
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
-def scrape_source(source: str, query: str | None = None) -> tuple[list[dict[str, Any]], str]:
+def scrape_source(
+    source: str,
+    query: str | None = None,
+    location: str | None = None,
+) -> tuple[list[dict[str, Any]], str]:
     if source == "remotive":
         return scrape_remotive()
     if source == "jobicy":
@@ -963,8 +965,9 @@ def scrape_source(source: str, query: str | None = None) -> tuple[list[dict[str,
     if source == "hn":
         return scrape_hn()
     if source == "linkedin":
-        return scrape_linkedin(query=query)
+        return scrape_linkedin(query=query, location=location or "United States")
     if source == "indeed":
+        # Indeed is USA-only (needs a local browser for Cloudflare); location is ignored.
         return scrape_indeed(query=query)
     return [], "none"
 
@@ -990,9 +993,10 @@ class handler(BaseHTTPRequestHandler):
             self._respond(400, {"error": f"Unknown source: {source!r}. Valid: {sorted(VALID_SOURCES)}"})
             return
         query = (payload.get("query") or "").strip() or None
+        location = (payload.get("location") or "").strip() or None
 
         try:
-            jobs, engine = scrape_source(source, query)
+            jobs, engine = scrape_source(source, query, location)
             self._respond(200, {"ok": True, "jobs": jobs, "engine": engine, "count": len(jobs)})
         except Exception as exc:
             self._respond(500, {"ok": False, "error": str(exc)[:300]})
@@ -1011,11 +1015,12 @@ if __name__ == "__main__":
     import sys
     src = sys.argv[1] if len(sys.argv) > 1 else ""
     cli_query = sys.argv[2] if len(sys.argv) > 2 else None
+    cli_location = sys.argv[3] if len(sys.argv) > 3 else None
     if src not in VALID_SOURCES:
         print(json.dumps({"ok": False, "error": f"Unknown source: {src!r}"}))
         sys.exit(1)
     try:
-        found, eng = scrape_source(src, cli_query)
+        found, eng = scrape_source(src, cli_query, cli_location)
         print(json.dumps({"ok": True, "jobs": found, "engine": eng, "count": len(found)}))
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)[:300]}))

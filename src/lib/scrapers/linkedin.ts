@@ -21,17 +21,22 @@ export class LinkedInScraper extends BaseScraper {
     this.acceptHeader = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
   }
 
-  async fetch(limit: number, query?: string): Promise<RawPosting[]> {
+  async fetch(limit: number, query?: string, location?: string): Promise<RawPosting[]> {
     const seen = new Set<string>();
     const all: RawPosting[] = [];
     // Single-position scrape when a keyword is passed; otherwise sweep all titles.
     const queries: readonly string[] = query ? [query] : QUERIES;
+    // When a country is requested (USA/UK/Canada), scrape just that location and
+    // paginate it fully; otherwise fall back to the default US + Philippines mix.
+    const variants: Array<{ param: string; pageStarts: number[] }> = location
+      ? [{ param: encodeURIComponent(location), pageStarts: [0, 10, 20] }]
+      : LOCATION_VARIANTS;
 
     for (const q of queries) {
       if (all.length >= limit) break;
       const encoded = encodeURIComponent(q);
 
-      for (const { param, pageStarts } of LOCATION_VARIANTS) {
+      for (const { param, pageStarts } of variants) {
         if (all.length >= limit) break;
 
         for (const start of pageStarts) {

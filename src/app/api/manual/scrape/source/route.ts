@@ -3,9 +3,10 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { verifyManualAuth } from "@/lib/auth";
 import { scraperForSource, ENABLED_SOURCES } from "@/lib/scrapers";
+import { linkedinLocationForCountry } from "@/lib/scrapers/positions";
 import { jobSourceLabel } from "@/lib/job-sources";
 import { ingestPostings } from "@/lib/agent/perception";
-import { filterVaPostings } from "@/lib/agent/va-filter";
+import { filterTechPostings } from "@/lib/agent/va-filter";
 import { parseIngestPostings } from "@/lib/scraper/python-client";
 import type { JobSource, RawPosting } from "@/types";
 
@@ -15,7 +16,11 @@ export const runtime = "nodejs";
 
 // ── Local dev: spawn Python as a subprocess (Python endpoints only run on Vercel)
 
-function tryPythonSubprocess(source: string, query?: string): Promise<RawPosting[] | null> {
+function tryPythonSubprocess(
+  source: string,
+  query?: string,
+  location?: string
+): Promise<RawPosting[] | null> {
   const scriptPath = path.join(process.cwd(), "api", "py", "scrape_jobs.py");
   return new Promise<RawPosting[] | null>((resolve) => {
     let stdout = "";
@@ -27,7 +32,13 @@ function tryPythonSubprocess(source: string, query?: string): Promise<RawPosting
       resolve(result);
     };
     const timer = setTimeout(() => { proc.kill(); finish(null); }, 55_000);
-    const args = query ? [scriptPath, source, query] : [scriptPath, source];
+    // CLI is positional: <source> <query> <location>. Location only applies to
+    // LinkedIn; pass it when we have a query (per-position scrapes always do).
+    const args = query
+      ? location
+        ? [scriptPath, source, query, location]
+        : [scriptPath, source, query]
+      : [scriptPath, source];
     const proc = spawn("python", args, {
       cwd: process.cwd(),
       env: { ...process.env },
@@ -52,7 +63,8 @@ function tryPythonSubprocess(source: string, query?: string): Promise<RawPosting
 async function tryPythonVercel(
   source: JobSource,
   origin: string,
-  query?: string
+  query?: string,
+  location?: string
 ): Promise<RawPosting[] | null> {
   const secret = process.env.CRON_SECRET ?? process.env.ADMIN_TOKEN ?? "";
   try {
@@ -62,7 +74,11 @@ async function tryPythonVercel(
         "Content-Type": "application/json",
         Authorization: `Bearer ${secret}`,
       },
-      body: JSON.stringify(query ? { source, query } : { source }),
+      body: JSON.stringify({
+        source,
+        ...(query ? { query } : {}),
+        ...(location ? { location } : {}),
+      }),
       signal: AbortSignal.timeout(52_000),
     });
     if (!res.ok) return null;
@@ -78,13 +94,14 @@ async function tryPythonVercel(
 async function tryPythonScraper(
   source: JobSource,
   origin: string,
-  query?: string
+  query?: string,
+  location?: string
 ): Promise<RawPosting[] | null> {
   if (process.env.VERCEL !== "1") {
     // Local dev: spawn Python directly — the /api/py endpoint is Vercel-only
-    return tryPythonSubprocess(source, query);
+    return tryPythonSubprocess(source, query, location);
   }
-  return tryPythonVercel(source, origin, query);
+  return tryPythonVercel(source, origin, query, location);
 }
 
 export async function POST(request: Request) {
@@ -92,7 +109,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { source?: string; query?: string } = {};
+  let body: { source?: string; query?: string; country?: string } = {};
   try {
     body = await request.json();
   } catch {
@@ -101,6 +118,9 @@ export async function POST(request: Request) {
 
   const source = body.source as JobSource | undefined;
   const query = typeof body.query === "string" && body.query.trim() ? body.query.trim() : undefined;
+  // LinkedIn scrapes a specific country; Indeed is USA-only and ignores it.
+  const location =
+    source === "linkedin" ? linkedinLocationForCountry(body.country) : undefined;
   if (!source || !ENABLED_SOURCES.includes(source)) {
     return NextResponse.json(
       { error: `Unknown or disabled source: ${source}` },
@@ -130,7 +150,7 @@ export async function POST(request: Request) {
   try {
     // Prefer the Python scraper (curl_cffi / Playwright). Fall back to the TS
     // scraper only where it can actually work.
-    const pythonPostings = await tryPythonScraper(source, origin, query);
+    const pythonPostings = await tryPythonScraper(source, origin, query, location);
 
     // Indeed's TS scraper is a plain HTTP fetch that Cloudflare answers with a
     // 403; running it after Python came up empty just turned "no results" into a
@@ -151,9 +171,9 @@ export async function POST(request: Request) {
       });
     }
 
-    const raw = pythonPostings ?? (await scraper.fetch(200, query));
+    const raw = pythonPostings ?? (await scraper.fetch(200, query, location));
 
-    const filtered = filterVaPostings(raw);
+    const filtered = filterTechPostings(raw);
     const { scraped, inserted } = await ingestPostings(filtered);
     return NextResponse.json({
       ok: true,

@@ -7,10 +7,10 @@ vi.mock("@/lib/scraper/node-runner", () => ({
         source: "remoteok",
         externalId: "1",
         url: "https://example.com/1",
-        title: "Medical Receptionist",
-        company: "ClearPath Health",
+        title: "Backend Developer",
+        company: "Acme",
         location: "US Remote",
-        description: "We need a remote medical receptionist to schedule appointments and verify insurance eligibility.",
+        description: "Build and scale our Node/TypeScript APIs. Fully remote.",
         postedAt: null,
         raw: {},
       },
@@ -18,10 +18,10 @@ vi.mock("@/lib/scraper/node-runner", () => ({
         source: "remoteok",
         externalId: "2",
         url: "https://example.com/2",
-        title: "Senior Rust Engineer",
-        company: "Acme",
+        title: "Registered Nurse",
+        company: "ClearPath Health",
         location: "Remote",
-        description: "Hardcore systems work.",
+        description: "Provide bedside patient care on our telehealth floor.",
         postedAt: null,
         raw: {},
       },
@@ -66,10 +66,10 @@ describe("perception", () => {
     vi.clearAllMocks();
   });
 
-  it("uses Node scrapers, filters down to VA roles, and persists only VA postings", async () => {
+  it("uses Node scrapers, filters down to tech roles, and persists only tech postings", async () => {
     const { runPerception } = await import("@/lib/agent/perception");
     const result = await runPerception(10);
-    // Only the medical admin posting should pass the medical pre-filter
+    // Only the developer posting should pass the tech pre-filter (the nurse is dropped)
     expect(result.scraped).toBe(1);
     expect(result.inserted).toBe(1);
     expect(result.engine).toBe("node");

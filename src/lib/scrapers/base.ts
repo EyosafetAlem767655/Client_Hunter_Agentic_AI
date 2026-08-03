@@ -43,7 +43,9 @@ export abstract class BaseScraper {
   }
 
   // `query`, when provided, restricts the scrape to a single keyword/position.
-  abstract fetch(limit: number, query?: string): Promise<RawPosting[]>;
+  // `location` is only meaningful to the LinkedIn scraper (US/UK/Canada); every
+  // other source ignores it.
+  abstract fetch(limit: number, query?: string, location?: string): Promise<RawPosting[]>;
 
   async fetchWithinBudget(
     limit: number,

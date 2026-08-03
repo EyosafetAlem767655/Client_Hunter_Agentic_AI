@@ -34,7 +34,22 @@
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('ok:',d.get\\('ok'\\),'engine:',d.get\\('engine'\\),'count:',d.get\\('count'\\)\\); [print\\(' -',j.get\\('title'\\),'@',j.get\\('company'\\)\\) for j in d.get\\('jobs',[]\\)[:3]]\")",
       "Bash(timeout 60 python api/py/scrape_jobs.py indeed \"Medical Receptionist\")",
       "Bash(timeout 90 python api/py/scrape_jobs.py indeed \"Medical Receptionist\")",
-      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('ok:',d.get\\('ok'\\),'| engine:',d.get\\('engine'\\),'| count:',d.get\\('count'\\)\\)\")"
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('ok:',d.get\\('ok'\\),'| engine:',d.get\\('engine'\\),'| count:',d.get\\('count'\\)\\)\")",
+      "WebFetch(domain:help.close.com)",
+      "Bash(pnpm add *)",
+      "Bash(echo \"TSC_EXIT=$?\")",
+      "Bash(npx vercel *)",
+      "Bash(python -)",
+      "Bash(python -c \"import playwright; print\\('playwright OK'\\)\")",
+      "Bash(rm -rf .playwright/indeed)",
+      "Bash(INDEED_VERIFY_WAIT=75 python api/py/scrape_jobs.py indeed \"medical receptionist\")",
+      "Bash(python api/py/scrape_jobs.py indeed \"medical receptionist\")",
+      "Bash(python -c ' *)",
+      "Bash(time python api/py/scrape_jobs.py indeed \"medical biller\")",
+      "Bash(git grep *)",
+      "Bash(grep -viE \"process\\\\.env|env\\\\.[A-Z_]+|example|placeholder|your[_-]|<.*>|\\\\$\\\\{\")",
+      "Bash(gh repo *)",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\({k:d.get\\(k\\) for k in ['ok','source','engine','fetched','count','inserted','durationMs','error']}\\)\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\Administrator\\Projects\\Job_hunter_agentic_AI\\src\\app\\api\\crm\\close\\unlink"

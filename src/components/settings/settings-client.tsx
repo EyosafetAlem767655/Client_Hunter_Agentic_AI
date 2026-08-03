@@ -25,7 +25,13 @@ import {
   XCircle,
 } from "lucide-react";
 import { ENABLED_SOURCES, jobSourceLabel } from "@/lib/job-sources";
-import { JOB_POSITIONS, indeedQueryFromUrl, type JobPosition } from "@/lib/scrapers/positions";
+import {
+  JOB_POSITIONS,
+  SCRAPE_COUNTRIES,
+  indeedQueryFromUrl,
+  type JobPosition,
+  type ScrapeCountry,
+} from "@/lib/scrapers/positions";
 
 const TOKEN_KEY = "talentbridge_admin_token";
 
@@ -494,20 +500,21 @@ export function SettingsClient({
     }
   }
 
-  // Scrape a SINGLE position (USA Remote) from one source, then filter it.
+  // Scrape a SINGLE position from one source in one country, then filter it.
   //
-  // Indeed used to pop its search into a tab here and wait 7 s. That never did
-  // anything: the tab is a session in *this* browser, while the scrape runs in
-  // Python on the server, with its own cookies — so a check cleared in the tab
-  // was invisible to the scraper. The server now drives its own Chromium window
-  // and rides out Cloudflare's ~15 s check there, which is the session that has
-  // to be clear. Expect an Indeed run to take ~20 s cold, ~10 s once warm.
-  async function scrapeOnePosition(source: "linkedin" | "indeed", position: JobPosition) {
+  // LinkedIn scrapes the country's `location` (USA/UK/Canada). Indeed is USA-only:
+  // the server drives its own Chromium window and rides out Cloudflare's ~15 s
+  // check there (~20 s cold, ~10 s warm) — nothing opens in this browser.
+  async function scrapeOnePosition(
+    source: "linkedin" | "indeed",
+    position: JobPosition,
+    country: ScrapeCountry
+  ) {
     if (!token.trim()) {
       showToast("err", "Unauthorized — enter ADMIN_TOKEN first.");
       return;
     }
-    const key = `${source}:${position.id}`;
+    const key = `${country.id}:${source}:${position.id}`;
     const query =
       source === "indeed" ? indeedQueryFromUrl(position.indeedUrl) : position.linkedinQuery;
 
@@ -519,7 +526,7 @@ export function SettingsClient({
           Authorization: `Bearer ${token.trim()}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ source, query }),
+        body: JSON.stringify({ source, query, country: country.id }),
       });
       const data: {
         ok?: boolean;
@@ -541,15 +548,15 @@ export function SettingsClient({
         },
       }));
       if (ok) {
-        showToast("ok", `${position.label}: ${data.count ?? 0} found, ${data.inserted ?? 0} new — filtering…`);
+        showToast("ok", `${country.label} · ${position.label}: ${data.count ?? 0} found, ${data.inserted ?? 0} new — filtering…`);
       } else {
-        showToast("err", `${position.label} failed: ${data.error ?? "Unknown error"}`);
+        showToast("err", `${country.label} · ${position.label} failed: ${data.error ?? "Unknown error"}`);
       }
       // Relevancy filter (source-scoped) — scores + saves this position's new jobs.
       setLoading("Filter");
       try {
         const filter = await runFilterLoop(source);
-        showToast("ok", `${position.label}: filter done — ${filter.relevant} new relevant`);
+        showToast("ok", `${country.label} · ${position.label}: filter done — ${filter.relevant} new relevant`);
       } catch (e) {
         showToast("err", `Filter failed: ${e instanceof Error ? e.message : "Unknown error"}`);
       } finally {
@@ -558,7 +565,7 @@ export function SettingsClient({
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Request failed";
       setSiteScrapeState((prev) => ({ ...prev, [key]: { loading: false, ok: false, error: msg } }));
-      showToast("err", `${position.label} failed: ${msg}`);
+      showToast("err", `${country.label} · ${position.label} failed: ${msg}`);
     }
   }
 
@@ -1013,58 +1020,66 @@ export function SettingsClient({
             <CardTitle>Manual triggers</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            {/* Per-position scrape tables — one per source, scraped one at a time */}
-            {(["linkedin", "indeed"] as const).map((source) => (
-              <div key={source} className="rounded-xl border border-primary/20 bg-background/30 p-4 space-y-3">
+            {/* Per-position scrape tables — grouped by country, one table per
+                source, scraped one role at a time. USA = Indeed + LinkedIn;
+                UK & Canada = LinkedIn only. */}
+            {SCRAPE_COUNTRIES.map((country) => (
+              <div key={country.id} className="rounded-xl border border-primary/25 bg-background/20 p-4 space-y-4">
                 <div className="flex items-center gap-2">
-                  <Search className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">{jobSourceLabel(source)} — scrape by position (USA Remote)</span>
+                  <span className="text-sm font-semibold">{country.label} — Remote</span>
+                  <span className="text-xs text-muted-foreground">
+                    {country.sources.map(jobSourceLabel).join(" + ")}
+                  </span>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Click a position to scrape just that role — the relevancy filter runs automatically after.
-                  {source === "indeed" && (
-                    <>
-                      {" "}
-                      <span className="text-amber-700/80 font-medium">Indeed</span> opens the position&apos;s
-                      search in a new tab (your real session) and waits ~7s before the server scrapes.
-                    </>
-                  )}
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {JOB_POSITIONS.map((position) => {
-                    const key = `${source}:${position.id}`;
-                    const state = siteScrapeState[key];
-                    const busy = state?.loading ?? false;
-                    return (
-                      <button
-                        key={key}
-                        disabled={!token.trim() || busy || loading !== null}
-                        onClick={() => void scrapeOnePosition(source, position)}
-                        className="flex flex-col items-start gap-1 rounded-lg border border-primary/20 bg-background/50 p-2.5 text-left hover:bg-primary/5 disabled:opacity-40 transition-colors"
-                      >
-                        <div className="flex items-center gap-1.5 text-sm font-medium">
-                          {busy ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
-                          ) : state?.ok === true ? (
-                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                          ) : state?.ok === false ? (
-                            <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
-                          ) : (
-                            <Play className="h-3.5 w-3.5 text-primary shrink-0" />
-                          )}
-                          <span className="truncate">{position.label}</span>
-                        </div>
-                        {state && !busy && (
-                          <span className="text-xs text-muted-foreground truncate w-full">
-                            {state.ok
-                              ? `${state.count ?? 0} found · ${state.inserted ?? 0} new${state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}`
-                              : (state.error ?? "Failed").slice(0, 42)}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+
+                {country.sources.map((source) => (
+                  <div key={source} className="rounded-lg border border-primary/15 bg-background/40 p-3 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Search className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-medium">{jobSourceLabel(source)}</span>
+                      {source === "indeed" && (
+                        <span className="text-xs text-amber-700/80">
+                          opens its own browser window · ~15s Cloudflare check · local only
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {JOB_POSITIONS.map((position) => {
+                        const key = `${country.id}:${source}:${position.id}`;
+                        const state = siteScrapeState[key];
+                        const busy = state?.loading ?? false;
+                        return (
+                          <button
+                            key={key}
+                            disabled={!token.trim() || busy || loading !== null}
+                            onClick={() => void scrapeOnePosition(source, position, country)}
+                            className="flex flex-col items-start gap-1 rounded-lg border border-primary/20 bg-background/50 p-2.5 text-left hover:bg-primary/5 disabled:opacity-40 transition-colors"
+                          >
+                            <div className="flex items-center gap-1.5 text-sm font-medium">
+                              {busy ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                              ) : state?.ok === true ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                              ) : state?.ok === false ? (
+                                <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                              ) : (
+                                <Play className="h-3.5 w-3.5 text-primary shrink-0" />
+                              )}
+                              <span className="truncate">{position.label}</span>
+                            </div>
+                            {state && !busy && (
+                              <span className="text-xs text-muted-foreground truncate w-full">
+                                {state.ok
+                                  ? `${state.count ?? 0} found · ${state.inserted ?? 0} new${state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}`
+                                  : (state.error ?? "Failed").slice(0, 42)}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
 
