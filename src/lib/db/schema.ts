@@ -157,6 +157,28 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const indeedScrapeJobs = pgTable(
+  "indeed_scrape_jobs",
+  {
+    id: serial("id").primaryKey(),
+    query: text("query"),
+    status: text("status").notNull().default("queued"),
+    workerId: text("worker_id"),
+    requestedAt: timestamp("requested_at").defaultNow().notNull(),
+    claimedAt: timestamp("claimed_at"),
+    completedAt: timestamp("completed_at"),
+    fetched: integer("fetched").default(0).notNull(),
+    inserted: integer("inserted").default(0).notNull(),
+    error: text("error"),
+  },
+  (table) => [
+    index("indeed_scrape_jobs_status_requested_idx").on(
+      table.status,
+      table.requestedAt
+    ),
+  ]
+);
+
 export const companyEnrichments = pgTable(
   "company_enrichments",
   {

@@ -438,13 +438,20 @@ export function SettingsClient({
         },
         body: JSON.stringify({ source }),
       });
-      const data: {
+      let data: {
         ok?: boolean;
+        queued?: boolean;
+        jobId?: number;
+        status?: string;
         count?: number;
         inserted?: number;
         durationMs?: number;
         error?: string;
       } = await res.json().catch(() => ({}));
+      if (data.queued && data.jobId) {
+        showToast("ok", `${label}: queued — waiting for the local Indeed worker…`);
+        data = await waitForIndeedQueue(data.jobId);
+      }
       const ok = data.ok ?? false;
       setSiteScrapeState((prev) => ({
         ...prev,
@@ -464,6 +471,7 @@ export function SettingsClient({
         );
       } else {
         showToast("err", `${label} failed: ${data.error ?? "Unknown error"}`);
+        if (data.status) return;
       }
       // Always run the filter — picks up pending jobs from this scrape AND any
       // previous scrapes that haven't been filtered yet.
@@ -489,11 +497,34 @@ export function SettingsClient({
     }
   }
 
+  async function waitForIndeedQueue(jobId: number): Promise<{
+    ok?: boolean;
+    status?: string;
+    count?: number;
+    inserted?: number;
+    error?: string;
+  }> {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const res = await fetch(`/api/manual/scrape/indeed/${jobId}`, {
+        headers: { Authorization: `Bearer ${token.trim()}` },
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Queue status HTTP ${res.status}`);
+      if (data.status === "completed" || data.status === "failed") return data;
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    return {
+      ok: false,
+      status: "timed_out",
+      error: "Timed out waiting for the local Indeed worker. Keep the worker running and try again.",
+    };
+  }
+
   // Scrape a SINGLE position from one source in one country, then filter it.
   //
-  // LinkedIn scrapes the country's `location` (USA/UK/Canada). Indeed is USA-only:
-  // the server drives its own Chromium window and rides out Cloudflare's ~15 s
-  // check there (~20 s cold, ~10 s warm) — nothing opens in this browser.
+  // LinkedIn runs on the server. Indeed is USA-only and is queued for the local
+  // browser worker when this UI is deployed on Vercel.
   async function scrapeOnePosition(
     source: "linkedin" | "indeed",
     position: JobPosition,
@@ -517,13 +548,23 @@ export function SettingsClient({
         },
         body: JSON.stringify({ source, query, country: country.id }),
       });
-      const data: {
+      let data: {
         ok?: boolean;
+        queued?: boolean;
+        jobId?: number;
+        status?: string;
         count?: number;
         inserted?: number;
         durationMs?: number;
         error?: string;
       } = await res.json().catch(() => ({}));
+      if (data.queued && data.jobId) {
+        showToast(
+          "ok",
+          `${country.label} · ${position.label}: queued — waiting for the local Indeed worker…`
+        );
+        data = await waitForIndeedQueue(data.jobId);
+      }
       const ok = data.ok ?? false;
       setSiteScrapeState((prev) => ({
         ...prev,
@@ -540,6 +581,7 @@ export function SettingsClient({
         showToast("ok", `${country.label} · ${position.label}: ${data.count ?? 0} found, ${data.inserted ?? 0} new — filtering…`);
       } else {
         showToast("err", `${country.label} · ${position.label} failed: ${data.error ?? "Unknown error"}`);
+        if (data.status) return;
       }
       // Relevancy filter (source-scoped) — scores + saves this position's new jobs.
       setLoading("Filter");

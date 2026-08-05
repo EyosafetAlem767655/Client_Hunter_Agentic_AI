@@ -67,6 +67,7 @@ const envSchema = z.object({
   GMAIL_APP_PASSWORD: z.string().min(16),
   CRON_SECRET: z.string().min(8),
   ADMIN_TOKEN: z.string().min(8),
+  INDEED_WORKER_TOKEN: z.string().min(8).optional(),
   BUSINESS_NAME: z.string().min(1),
   BUSINESS_ADDRESS: z.string().min(1),
   CONTACT_EMAIL: z.string().email(),

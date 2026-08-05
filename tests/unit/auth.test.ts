@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { verifyCronAuth, verifyManualAuth } from "@/lib/auth";
+import { verifyCronAuth, verifyManualAuth, verifyWorkerAuth } from "@/lib/auth";
 
 function request(headers: Record<string, string>): Request {
   return new Request("http://localhost/api/cron/scrape", { headers });
@@ -41,5 +41,21 @@ describe("auth", () => {
 
   it("rejects missing auth", () => {
     expect(verifyManualAuth(request({}))).toBe(false);
+  });
+
+  it("accepts ADMIN_TOKEN for a local worker", () => {
+    expect(
+      verifyWorkerAuth(request({ Authorization: "Bearer test-admin-token" }))
+    ).toBe(true);
+  });
+
+  it("accepts a dedicated Indeed worker token", () => {
+    const previous = process.env.INDEED_WORKER_TOKEN;
+    process.env.INDEED_WORKER_TOKEN = "test-worker-token";
+    expect(
+      verifyWorkerAuth(request({ Authorization: "Bearer test-worker-token" }))
+    ).toBe(true);
+    if (previous === undefined) delete process.env.INDEED_WORKER_TOKEN;
+    else process.env.INDEED_WORKER_TOKEN = previous;
   });
 });

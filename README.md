@@ -80,6 +80,29 @@ Flow: cron/manual → Node orchestrator → **Python** (`/api/py/scrape` on Verc
 
 Local manual scrape: `python scraper/run.py --limit 50` (requires `pip install -r scraper/requirements.txt`).
 
+### Indeed local browser worker for Vercel
+
+Vercel cannot open a browser on your computer, so Indeed button clicks are
+placed in Neon and picked up by a worker running on your PC. No inbound port or
+tunnel is required.
+
+1. Deploy this version so Vercel creates the `indeed_scrape_jobs` table.
+2. Optionally set `INDEED_WORKER_TOKEN` in Vercel (otherwise use `ADMIN_TOKEN`).
+3. On the PC that has Chrome, Edge, Brave, or Chromium installed:
+
+```powershell
+python -m pip install -r api/py/requirements.txt
+$env:TALENTBRIDGE_URL="https://your-app.vercel.app"
+$env:INDEED_WORKER_TOKEN="the-same-token-set-on-vercel"
+python scripts/indeed_worker.py
+```
+
+Keep that terminal running. Clicking an Indeed scrape button on the deployed
+Settings page will enqueue the request; within a few seconds the worker opens
+the local browser, uploads the jobs, and the page continues with filtering.
+Use `python scripts/indeed_worker.py --url ... --token ... --once` to process a
+single queued request and exit.
+
 Optional GitHub Actions backup (`.github/workflows/scrape-python.yml`): set repo secrets `APP_URL` + `CRON_SECRET` for ingest at 06:30 UTC.
 
 ## Going live

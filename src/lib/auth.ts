@@ -38,3 +38,11 @@ export function verifyManualAuth(request: Request): boolean {
 export function verifyIngestAuth(request: Request): boolean {
   return verifyManualAuth(request);
 }
+
+/** Local Indeed workers use a dedicated token when configured, or ADMIN_TOKEN. */
+export function verifyWorkerAuth(request: Request): boolean {
+  const token = bearerToken(request);
+  if (!token) return false;
+  const workerToken = process.env.INDEED_WORKER_TOKEN?.trim();
+  return token === env.ADMIN_TOKEN.trim() || Boolean(workerToken && token === workerToken);
+}

@@ -8,6 +8,7 @@ import { jobSourceLabel } from "@/lib/job-sources";
 import { ingestPostings } from "@/lib/agent/perception";
 import { filterTechPostings } from "@/lib/agent/va-filter";
 import { parseIngestPostings } from "@/lib/scraper/python-client";
+import { enqueueIndeedScrape } from "@/lib/indeed-queue";
 import type { JobSource, RawPosting } from "@/types";
 
 export const maxDuration = 60;
@@ -141,6 +142,26 @@ export async function POST(request: Request) {
 
   const label = jobSourceLabel(source);
   const start = Date.now();
+
+  // A Vercel function cannot display a browser on the user's PC. Queue Indeed
+  // for the local worker, which polls over HTTPS and uploads the scraped jobs.
+  if (source === "indeed" && process.env.VERCEL === "1") {
+    const job = await enqueueIndeedScrape(query);
+    return NextResponse.json(
+      {
+        ok: true,
+        queued: true,
+        jobId: job.id,
+        status: job.status,
+        source,
+        label,
+        count: 0,
+        inserted: 0,
+        durationMs: Date.now() - start,
+      },
+      { status: 202 }
+    );
+  }
 
   // Derive origin for the self-referential Python endpoint call
   const host =
