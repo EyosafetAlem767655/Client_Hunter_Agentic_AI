@@ -427,17 +427,6 @@ export function SettingsClient({
       return;
     }
 
-    // Indeed blocks server-side HTTP clients. Open the actual search page in
-    // the user's browser so their real session loads the jobs — the server
-    // scrapes in parallel using Chrome TLS fingerprint (curl_cffi).
-    if (source === "indeed") {
-      window.open(
-        "https://www.indeed.com/jobs?q=virtual+assistant&l=USA&ts=1783086508397&pts=1782809878056&from=searchOnDesktopSerp&rq=1&rsIdx=0&newcount=170&fromage=last&vjk=a0ae8c45bbd0379a",
-        "_blank",
-        "noopener,noreferrer"
-      );
-    }
-
     const label = jobSourceLabel(source);
     setSiteScrapeState((prev) => ({ ...prev, [source]: { loading: true } }));
     try {

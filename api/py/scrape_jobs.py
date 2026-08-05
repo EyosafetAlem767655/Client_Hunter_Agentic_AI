@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 from http.server import BaseHTTPRequestHandler
 from typing import Any
@@ -87,6 +88,77 @@ def _can_open_browser() -> bool:
     if os.environ.get("VERCEL") == "1":
         return False
     return os.environ.get("INDEED_BROWSER", "1") != "0"
+
+
+def _installed_browser_executables() -> list[str]:
+    """Find installed browsers usable by Playwright on this computer."""
+    configured = (os.environ.get("INDEED_BROWSER_PATH") or "").strip()
+    candidates: list[str] = [configured] if configured else []
+
+    if sys.platform == "win32":
+        roots = [
+            os.environ.get("PROGRAMFILES", ""),
+            os.environ.get("PROGRAMFILES(X86)", ""),
+            os.environ.get("LOCALAPPDATA", ""),
+        ]
+        relative_paths = [
+            os.path.join("Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join("Microsoft", "Edge", "Application", "msedge.exe"),
+            os.path.join("BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+            os.path.join("Chromium", "Application", "chrome.exe"),
+        ]
+        candidates.extend(
+            os.path.join(root, relative)
+            for root in roots if root
+            for relative in relative_paths
+        )
+    elif sys.platform == "darwin":
+        candidates.extend([
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ])
+
+    for command in (
+        "google-chrome", "google-chrome-stable", "microsoft-edge",
+        "microsoft-edge-stable", "brave-browser", "brave", "chromium", "chromium-browser",
+    ):
+        executable = shutil.which(command)
+        if executable:
+            candidates.append(executable)
+
+    found: list[str] = []
+    for candidate in candidates:
+        path = os.path.abspath(os.path.expanduser(candidate)) if candidate else ""
+        if path and os.path.isfile(path) and path not in found:
+            found.append(path)
+    return found
+
+
+def _launch_indeed_context(playwright):
+    """Open the first working local browser, with bundled Chromium last."""
+    base_options = {
+        "user_data_dir": _INDEED_PROFILE_DIR,
+        "headless": False,
+        "viewport": {"width": 1366, "height": 900},
+        "args": ["--disable-blink-features=AutomationControlled"],
+        "timeout": 15_000,
+    }
+    failures: list[str] = []
+    candidates: list[str | None] = [*_installed_browser_executables(), None]
+    for executable in candidates:
+        options = dict(base_options)
+        label = executable or "Playwright Chromium"
+        if executable:
+            options["executable_path"] = executable
+        try:
+            _log(f"Indeed: opening browser: {label}")
+            return playwright.chromium.launch_persistent_context(**options)
+        except Exception as exc:
+            failures.append(f"{label}: {str(exc).splitlines()[0]}")
+            _log(f"Indeed: could not open {label}; trying the next browser")
+    raise RuntimeError("No usable browser found. " + " | ".join(failures))
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -916,12 +988,7 @@ def scrape_indeed_playwright(
         #   * _STEALTH_JS — patching navigator.webdriver is itself detectable.
         #   * --no-sandbox / --disable-dev-shm-usage — classic automation flags.
         # A stock Chromium, left alone, clears the check on its own in ~15s.
-        ctx = p.chromium.launch_persistent_context(
-            user_data_dir=_INDEED_PROFILE_DIR,
-            headless=False,
-            viewport={"width": 1366, "height": 900},
-            args=["--disable-blink-features=AutomationControlled"],
-        )
+        ctx = _launch_indeed_context(p)
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
 
@@ -991,9 +1058,14 @@ def scrape_indeed(limit: int = 200, query: str | None = None) -> tuple[list[dict
     if _can_open_browser():
         sync_playwright = _try_playwright_import()
         if sync_playwright:
-            jobs = scrape_indeed_playwright(sync_playwright, limit, query)
-            if jobs:
-                return jobs, "playwright"
+            try:
+                jobs = scrape_indeed_playwright(sync_playwright, limit, query)
+                if jobs:
+                    return jobs, "playwright"
+            except Exception as exc:
+                _log(f"Indeed: browser launch/scrape failed: {exc}")
+        else:
+            _log("Indeed: Playwright is not installed for this Python interpreter")
 
     jobs = scrape_indeed_requests(limit, query)
     return (jobs, "requests") if jobs else ([], "none")

@@ -8,6 +8,14 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    // On Windows, starting many jsdom/Vite workers at once makes the first
+    // dynamic import in each file take longer than Vitest's 5 s default. The
+    // timed-out import keeps running and can consume mocks intended for the
+    // next test, producing misleading follow-on failures. Keep concurrency
+    // bounded and give module transforms a realistic ceiling.
+    maxWorkers: 4,
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     coverage: {
       provider: "v8",
       reportsDirectory: "./coverage",
