@@ -31,7 +31,10 @@ function tryPythonSubprocess(
       clearTimeout(timer);
       resolve(result);
     };
-    const timer = setTimeout(() => { proc.kill(); finish(null); }, 55_000);
+    // Indeed opens a real browser and may wait for a human to clear an "I am not
+    // a robot" check, so it gets a much longer window than the API-only sources.
+    const killMs = source === "indeed" ? 240_000 : 55_000;
+    const timer = setTimeout(() => { proc.kill(); finish(null); }, killMs);
     // CLI is positional: <source> <query> <location>. Location only applies to
     // LinkedIn; pass it when we have a query (per-position scrapes always do).
     const args = query

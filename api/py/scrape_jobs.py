@@ -835,12 +835,17 @@ window.chrome={runtime:{}};
 _INDEED_PROFILE_DIR = os.path.join(os.getcwd(), ".playwright", "indeed")
 
 # Ceiling on how long to sit on the search page waiting for the Cloudflare check
-# to clear. Measured at 13-15s, so a hard 15s cutoff flakes; we wait longer but
-# return the instant job cards appear, so the common case still costs ~14s.
-_INDEED_VERIFY_WAIT = int(os.environ.get("INDEED_VERIFY_WAIT", "45"))
+# to clear — long by default so there's plenty of time to solve an "I am not a
+# robot" check by hand. It returns the instant job cards appear, so a check that
+# auto-clears (~15s) still costs ~15s; the ceiling only matters when a human is
+# clicking through a CAPTCHA.
+_INDEED_VERIFY_WAIT = int(os.environ.get("INDEED_VERIFY_WAIT", "180"))
 
 # Job cards. Their presence is what tells us the challenge is behind us.
 _INDEED_CARDS = ".job_seen_beacon, [data-testid='slider_item']"
+
+# Page-title markers for Cloudflare's interstitial / block page.
+_INDEED_CHALLENGE_TITLES = ("just a moment", "moment", "verify", "verifying", "human", "blocked", "attention")
 
 
 def _page_html(page, attempts: int = 5) -> str:
@@ -851,6 +856,22 @@ def _page_html(page, attempts: int = 5) -> str:
         except Exception:
             page.wait_for_timeout(500)
     return ""
+
+
+def _indeed_has_cards(page) -> bool:
+    try:
+        return page.query_selector(_INDEED_CARDS) is not None
+    except Exception:
+        return False
+
+
+def _indeed_on_challenge(page) -> bool:
+    """Detect the verification page via its title (safe — doesn't raise mid-redirect)."""
+    try:
+        t = (page.title() or "").lower()
+    except Exception:
+        return False
+    return any(m in t for m in _INDEED_CHALLENGE_TITLES)
 
 
 def scrape_indeed_playwright(
@@ -877,9 +898,9 @@ def scrape_indeed_playwright(
     click-through, it's on screen and the wait is long enough to solve it by hand.
     """
     queries = _indeed_queries(query) if query else [
-        "medical+receptionist", "patient+coordinator",
-        "prior+authorization+specialist", "medical+biller",
-        "insurance+verification+specialist", "medical+administrative+assistant",
+        "front+end+developer+remote", "backend+developer+remote",
+        "full+stack+developer+remote", "software+engineer+remote",
+        "ai+engineer+remote", "data+analyst+remote",
     ]
     seen: set[str] = set()
     jobs: list[dict[str, Any]] = []
@@ -909,20 +930,49 @@ def scrape_indeed_playwright(
                     break
                 try:
                     page.goto(_indeed_url(q, query), wait_until="domcontentloaded", timeout=30_000)
-                    if i == 0:
-                        _log(
-                            f"Indeed: waiting up to {verify_wait}s for the verification check "
-                            f"to clear. If it asks you to click something, do it in the "
-                            f"browser window that just opened."
-                        )
-                    page.wait_for_selector(_INDEED_CARDS, timeout=verify_wait * 1000)
+                    if not _wait_for_indeed_results(page, verify_wait):
+                        _log(f"Indeed: no results for {q!r} within {verify_wait}s (title: {page.title()[:40]!r})")
+                        continue
                     jobs.extend(_parse_indeed_page(_page_html(page), seen))
                 except Exception:
                     # This query didn't come through; the next one may still.
-                    _log(f"Indeed: no results for {q!r} (page title: {page.title()[:40]!r})")
+                    _log(f"Indeed: error scraping {q!r} (title: {page.title()[:40]!r})")
         finally:
             ctx.close()
     return jobs
+
+
+def _wait_for_indeed_results(page, verify_wait: int) -> bool:
+    """Wait until job cards appear, giving a human time to clear the robot check.
+
+    Returns True as soon as results are on the page. Cloudflare usually clears on
+    its own in ~15s; if it puts up an "I am not a robot" / CAPTCHA, this prints a
+    prominent prompt and keeps waiting (up to verify_wait seconds) so the check
+    can be solved by hand in the open browser window. Once solved, the profile
+    keeps the clearance cookie, so later roles in the same run go straight through.
+    """
+    if _indeed_has_cards(page):
+        return True
+
+    prompted = False
+    waited = 0
+    while waited < verify_wait:
+        if _indeed_has_cards(page):
+            return True
+        if not prompted and _indeed_on_challenge(page):
+            _log(
+                "\n"
+                "============================================================\n"
+                "  Indeed needs you to verify. In the Chrome window that just\n"
+                "  opened, complete the 'I am not a robot' / CAPTCHA check.\n"
+                f"  Waiting up to {verify_wait}s - scraping starts the moment it clears.\n"
+                "============================================================"
+            )
+            prompted = True
+        page.wait_for_timeout(1000)
+        waited += 1
+
+    return _indeed_has_cards(page)
 
 
 def scrape_indeed(limit: int = 200, query: str | None = None) -> tuple[list[dict[str, Any]], str]:

@@ -1039,7 +1039,7 @@ export function SettingsClient({
                       <span className="text-sm font-medium">{jobSourceLabel(source)}</span>
                       {source === "indeed" && (
                         <span className="text-xs text-amber-700/80">
-                          opens its own browser window · ~15s Cloudflare check · local only
+                          opens a browser window · solve the &quot;I&apos;m not a robot&quot; check if it appears · local only
                         </span>
                       )}
                     </div>
