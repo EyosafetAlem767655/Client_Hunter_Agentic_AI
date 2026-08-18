@@ -27,12 +27,15 @@ export const DraftedEmailSchema = z.object({
 export type FilteredJob = z.infer<typeof FilteredJobSchema>;
 export type DraftedEmail = z.infer<typeof DraftedEmailSchema>;
 
+// Gemini structured output does not reliably resolve the top-level `$ref`
+// emitted by named zod-to-json-schema definitions. Inline every schema so the
+// API receives a self-contained object instead of `definitions` + `$ref`.
 export const filteredJobJsonSchema = zodToJsonSchema(FilteredJobBatchSchema, {
-  name: "FilteredJobBatch",
+  $refStrategy: "none",
 });
 
 export const draftedEmailJsonSchema = zodToJsonSchema(DraftedEmailSchema, {
-  name: "DraftedEmail",
+  $refStrategy: "none",
 });
 
 export function parseFilteredBatch(

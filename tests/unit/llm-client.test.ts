@@ -11,6 +11,10 @@ vi.mock("@google/genai", () => ({
 }));
 
 import { callGeminiJson } from "@/lib/llm/client";
+import {
+  draftedEmailJsonSchema,
+  filteredJobJsonSchema,
+} from "@/lib/llm/schemas";
 
 const request = {
   model: "gemini-3.5-flash-lite",
@@ -43,6 +47,15 @@ describe("Gemini JSON client", () => {
         responseJsonSchema: request.jsonSchema,
       },
     });
+  });
+
+  it("uses self-contained schemas without Gemini-incompatible references", () => {
+    for (const schema of [filteredJobJsonSchema, draftedEmailJsonSchema]) {
+      const serialized = JSON.stringify(schema);
+      expect(serialized).not.toContain('"$ref"');
+      expect(serialized).not.toContain('"definitions"');
+      expect((schema as Record<string, unknown>).type).toBe("object");
+    }
   });
 
   it.each([
