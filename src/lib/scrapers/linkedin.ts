@@ -6,7 +6,7 @@ import { MEDICAL_VA_TITLES } from "./job-titles";
 
 const QUERIES: readonly string[] = MEDICAL_VA_TITLES;
 
-// f_WT=2 = remote work type, f_TPR=r604800 = past week
+// f_WT=2 = remote work type, f_TPR=r86400 = past 24 hours, sortBy=DD = newest.
 // Each location variant has a max page count to control request volume.
 // US: paginate fully (3 pages × 10 results). Philippines: 1 page each (catches
 // US companies that deliberately target Philippine remote talent).
@@ -34,7 +34,9 @@ export class LinkedInScraper extends BaseScraper {
 
     for (const q of queries) {
       if (all.length >= limit) break;
-      const encoded = encodeURIComponent(q);
+      // Including "remote" in the keywords reinforces LinkedIn's occasionally
+      // leaky f_WT=2 workplace filter.
+      const encoded = encodeURIComponent(`${q} remote`);
 
       for (const { param, pageStarts } of variants) {
         if (all.length >= limit) break;
@@ -44,7 +46,7 @@ export class LinkedInScraper extends BaseScraper {
           try {
             const url =
               `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search` +
-              `?keywords=${encoded}&location=${param}&f_WT=2&f_TPR=r86400&start=${start}`;
+              `?keywords=${encoded}&location=${param}&f_WT=2&f_TPR=r86400&sortBy=DD&start=${start}`;
 
             const res = await this.fetchWithRetry(url);
             const html = await res.text();
@@ -64,8 +66,10 @@ export class LinkedInScraper extends BaseScraper {
               const title = li.find("h3.base-search-card__title").first().text().trim();
               const company = li.find("h4.base-search-card__subtitle").first().text().trim();
               const location = li.find(".job-search-card__location").first().text().trim();
+              const cardText = li.text().replace(/\s+/g, " ").toLowerCase();
 
               if (!title) return;
+              if (/\b(?:hybrid|on[- ]?site|in[- ]office|in person)\b/.test(cardText)) return;
               pageCount++;
 
               all.push({
@@ -94,13 +98,12 @@ export class LinkedInScraper extends BaseScraper {
     // Skipped for single-position scrapes — those want only their keyword.
     if (!query && all.length < limit) {
       await sleep(10_000);
-      const vaEncoded = encodeURIComponent("virtual assistant");
       for (const start of [0, 10, 20]) {
         if (all.length >= limit) break;
         try {
           const url =
             `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search` +
-            `?keywords=${vaEncoded}&location=United+States&f_WT=2&f_TPR=r86400&start=${start}`;
+            `?keywords=${encodeURIComponent("virtual assistant remote")}&location=United+States&f_WT=2&f_TPR=r86400&sortBy=DD&start=${start}`;
           const res = await this.fetchWithRetry(url);
           const html = await res.text();
           const $ = cheerio.load(html);
@@ -116,7 +119,9 @@ export class LinkedInScraper extends BaseScraper {
             const title = li.find("h3.base-search-card__title").first().text().trim();
             const company = li.find("h4.base-search-card__subtitle").first().text().trim();
             const location = li.find(".job-search-card__location").first().text().trim();
+            const cardText = li.text().replace(/\s+/g, " ").toLowerCase();
             if (!title) return;
+            if (/\b(?:hybrid|on[- ]?site|in[- ]office|in person)\b/.test(cardText)) return;
             pageCount++;
             all.push({
               source: "linkedin",

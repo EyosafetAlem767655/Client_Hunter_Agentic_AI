@@ -423,6 +423,39 @@ describe("LinkedInScraper", () => {
     expect(result[1].title).toBe("Medical Receptionist");
     expect(result[1].company).toBe("MediCo");
   });
+
+  it("requests remote jobs from the past 24 hours and drops leaked hybrid cards", async () => {
+    const html = `<ul>
+      <li>
+        <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/remote"></a>
+        <h3 class="base-search-card__title">Remote Software Engineer</h3>
+        <h4 class="base-search-card__subtitle">RemoteCo</h4>
+        <span class="job-search-card__location">Remote</span>
+      </li>
+      <li>
+        <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/hybrid"></a>
+        <h3 class="base-search-card__title">Hybrid Software Engineer</h3>
+        <h4 class="base-search-card__subtitle">OfficeCo</h4>
+        <span class="job-search-card__location">New York, NY</span>
+      </li>
+    </ul>`;
+    const fetchSpy = vi
+      .spyOn(BaseScraper.prototype as never, "fetchWithRetry")
+      .mockResolvedValue({ text: async () => html } as unknown as Response);
+
+    const result = await new LinkedInScraper("bot@example.com").fetch(
+      10,
+      "software engineer",
+      "United States"
+    );
+
+    expect(result.map((job) => job.title)).toEqual(["Remote Software Engineer"]);
+    const requestedUrl = String(fetchSpy.mock.calls[0][0]);
+    expect(requestedUrl).toContain("f_WT=2");
+    expect(requestedUrl).toContain("f_TPR=r86400");
+    expect(requestedUrl).toContain("sortBy=DD");
+    expect(requestedUrl).toContain("software%20engineer%20remote");
+  });
 });
 
 describe("scraperForSource", () => {

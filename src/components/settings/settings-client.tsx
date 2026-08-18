@@ -540,6 +540,12 @@ export function SettingsClient({
 
     setSiteScrapeState((prev) => ({ ...prev, [key]: { loading: true } }));
     try {
+      if (source === "indeed") {
+        showToast(
+          "ok",
+          `${country.label} · ${position.label}: opening Indeed — complete the checker in the browser tab within 15 seconds…`
+        );
+      }
       const res = await fetch("/api/manual/scrape/source", {
         method: "POST",
         headers: {
@@ -1070,7 +1076,7 @@ export function SettingsClient({
                       <span className="text-sm font-medium">{jobSourceLabel(source)}</span>
                       {source === "indeed" && (
                         <span className="text-xs text-amber-700/80">
-                          opens a browser window · solve the &quot;I&apos;m not a robot&quot; check if it appears · local only
+                          opens a browser tab · complete the checker within 15 seconds · local only
                         </span>
                       )}
                     </div>

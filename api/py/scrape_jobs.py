@@ -427,7 +427,7 @@ def scrape_linkedin(
     query: str | None = None,
     location: str = "United States",
 ) -> tuple[list[dict[str, Any]], str]:
-    queries = [query.strip().replace(" ", "+")] if query else [
+    queries = [f"{query.strip()} remote".replace(" ", "+")] if query else [
         "front+end+developer", "backend+developer", "full+stack+developer",
         "software+engineer", "AI+engineer", "machine+learning+engineer",
         "AI+automation+specialist", "MERN+stack+developer",
@@ -448,15 +448,16 @@ def scrape_linkedin(
     for q in queries:
         if len(jobs) >= limit:
             break
+        search_q = q if "remote" in q.lower() else f"{q}+remote"
         empty_streak = 0
         for start in starts:
             if len(jobs) >= limit:
                 break
             try:
-                # f_WT=2 = remote work type, f_TPR=r604800 = past week
+                # Remote-only, posted in the past 24 hours, newest first.
                 url = (
                     "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
-                    f"?keywords={q}&location={loc_param}&f_WT=2&f_TPR=r604800&start={start}"
+                    f"?keywords={search_q}&location={loc_param}&f_WT=2&f_TPR=r86400&sortBy=DD&start={start}"
                 )
                 r = _get(url, timeout=12)
                 r.raise_for_status()
@@ -483,8 +484,11 @@ def scrape_linkedin(
                     title = title_el.get_text(strip=True) if title_el else ""
                     company = company_el.get_text(strip=True) if company_el else ""
                     location = loc_el.get_text(strip=True) if loc_el else "Remote"
+                    card_text = " ".join(li.get_text(" ", strip=True).lower().split())
 
                     if not title:
+                        continue
+                    if re.search(r"\b(?:hybrid|on[- ]?site|in[- ]office|in person)\b", card_text):
                         continue
                     jobs.append(_job(
                         source="linkedin",
@@ -848,7 +852,10 @@ def _parse_indeed_page(html: str, seen: set[str]) -> list[dict[str, Any]]:
 
 
 # Single-position search (USA, most recent first).
-_INDEED_QUERY_URL = "https://www.indeed.com/jobs?q={q}&l=USA&sort=date"
+_INDEED_QUERY_URL = (
+    "https://www.indeed.com/jobs?q={q}&l=Remote&sort=date&fromage=1"
+    "&sc=0kf%3Aattr%28DSQF7%29%3B"
+)
 
 
 def _indeed_queries(query: str | None) -> list[str]:
@@ -906,12 +913,9 @@ window.chrome={runtime:{}};
 # runs, so a challenge cleared once isn't re-armed on every scrape.
 _INDEED_PROFILE_DIR = os.path.join(os.getcwd(), ".playwright", "indeed")
 
-# Ceiling on how long to sit on the search page waiting for the Cloudflare check
-# to clear — long by default so there's plenty of time to solve an "I am not a
-# robot" check by hand. It returns the instant job cards appear, so a check that
-# auto-clears (~15s) still costs ~15s; the ceiling only matters when a human is
-# clicking through a CAPTCHA.
-_INDEED_VERIFY_WAIT = int(os.environ.get("INDEED_VERIFY_WAIT", "180"))
+# The visible browser gives the user 15 seconds to clear Indeed's checker. Keep
+# this short so a failed check returns control to the local dashboard promptly.
+_INDEED_VERIFY_WAIT = int(os.environ.get("INDEED_VERIFY_WAIT", "15"))
 
 # Job cards. Their presence is what tells us the challenge is behind us.
 _INDEED_CARDS = ".job_seen_beacon, [data-testid='slider_item']"
@@ -966,8 +970,8 @@ def scrape_indeed_playwright(
         an 8s budget it gave up ~5s before the page was ever going to be ready.
         Waiting on the job-card selector instead rides out the redirects.
 
-    Usually nobody has to touch the window. If Cloudflare does escalate to a
-    click-through, it's on screen and the wait is long enough to solve it by hand.
+    The browser tab stays visible for 15 seconds. If Cloudflare escalates to a
+    click-through, the user can solve it there before scraping begins.
     """
     queries = _indeed_queries(query) if query else [
         "front+end+developer+remote", "backend+developer+remote",
@@ -1014,8 +1018,8 @@ def _wait_for_indeed_results(page, verify_wait: int) -> bool:
 
     Returns True as soon as results are on the page. Cloudflare usually clears on
     its own in ~15s; if it puts up an "I am not a robot" / CAPTCHA, this prints a
-    prominent prompt and keeps waiting (up to verify_wait seconds) so the check
-    can be solved by hand in the open browser window. Once solved, the profile
+    prominent prompt and waits up to verify_wait seconds so the check can be
+    solved by hand in the open browser tab. Once solved, the profile
     keeps the clearance cookie, so later roles in the same run go straight through.
     """
     if _indeed_has_cards(page):
@@ -1062,8 +1066,10 @@ def scrape_indeed(limit: int = 200, query: str | None = None) -> tuple[list[dict
                 jobs = scrape_indeed_playwright(sync_playwright, limit, query)
                 if jobs:
                     return jobs, "playwright"
+                return [], "playwright"
             except Exception as exc:
                 _log(f"Indeed: browser launch/scrape failed: {exc}")
+                return [], "playwright"
         else:
             _log("Indeed: Playwright is not installed for this Python interpreter")
 
