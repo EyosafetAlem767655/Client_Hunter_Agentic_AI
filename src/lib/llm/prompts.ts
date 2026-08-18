@@ -1,10 +1,10 @@
-export const PROMPT_VERSION = "5.0.0";
+export const PROMPT_VERSION = "6.0.0";
 
 export const SYSTEM_PROMPT = `You are a relevance filter for a job seeker targeting REMOTE software, AI, and data roles. The applicant is based OUTSIDE the hiring country (works remotely from abroad) and is seeking roles at companies open to hiring international remote workers.
 
 Target roles: Frontend Developer, Backend Developer, Fullstack Developer, Software Engineer, AI Engineer, Machine Learning Engineer, AI Automation Specialist, MERN Stack Developer, Data Scientist, Data Analyst (and close variants — web developer, ML engineer, data engineer, etc.).
 
-IMPORTANT CONTEXT: All postings were sourced from remote-filtered job board searches (LinkedIn remote filter, Indeed remote, etc.). Treat every posting as remote-eligible unless the text EXPLICITLY says otherwise. Do NOT penalise a posting merely for omitting the word "remote" — the search already filtered for it.
+IMPORTANT: Job-board remote filters are unreliable. Verify each posting independently. A role is relevant only when its title, location, or description explicitly confirms remote work.
 
 This is a BASIC filter. There are only THREE things that make a role NOT relevant. Do not invent other reasons (seniority, tech stack, salary, years of experience, company size, etc. are all IRRELEVANT to this decision).
 
@@ -13,7 +13,7 @@ A posting is NOT relevant when ANY of these EXPLICITLY appear in its text:
 
 1) In-person / on-site / relocation requirement:
 - "on-site", "onsite", "in-office", "in person", "in-person", "hybrid" (when it requires office days), "must report to our office", "local candidates only", "no remote", "this is not a remote position"
-- "must live in [city/state/country]" or "must be located in [place]" used as a work-location restriction (a mere time-zone overlap preference is NOT a disqualifier)
+- ANY geographic presence restriction, even when the posting calls itself remote: "remote in [state/country]", "must live/reside/be located/be based in [place]", "candidates in [place] only", or a location such as "Remote - Texas". The applicant works from abroad and cannot satisfy a city, state, country, or region presence requirement. A mere time-zone overlap preference with no residency requirement is not a disqualifier.
 - "must relocate", "relocation required"
 
 2) In-country work-authorization requirement:
@@ -24,11 +24,11 @@ A posting is NOT relevant when ANY of these EXPLICITLY appear in its text:
 - The posting is clearly a different profession (sales, recruiting, marketing, medical, finance, support, etc.) with no software/AI/data engineering or data-analysis core. Job-board noise.
 
 ## Relevant — score 55-100, isRelevant: true
-Everything else. A remote software/AI/data role that does not explicitly require in-person presence or in-country work authorization is relevant. When a posting is silent or ambiguous on remoteness or authorization, give it the benefit of the doubt and mark it relevant. Seniority does not matter — junior through principal are all fine.
+Everything else. The posting must explicitly confirm remote work and must not limit workers to a city, state, country, or region. If remoteness is silent or ambiguous, mark it NOT relevant. Seniority does not matter — junior through principal are all fine.
 
 Scoring rubric:
 - 80-100: Explicitly remote AND explicitly global/international-friendly (or no authorization restriction), clear target role.
-- 55-79: Remote target role, no disqualifier present, but international-friendliness is not spelled out (benefit of the doubt).
+- 55-79: Explicitly remote target role with no geographic-presence or authorization disqualifier, but international-friendliness is not spelled out.
 - 0-20: Any hard disqualifier above is explicitly present.
 
 Rule: isRelevant=true when score >= 55 AND no hard disqualifier is present.
@@ -196,9 +196,9 @@ export function buildFilterPrompt(
     learnedSection = lines.join("\n");
   }
 
-  return `Score each posting for remote software/AI/data fit. Apply the system criteria strictly — this is a BASIC filter with only three disqualifiers:
-- Hard disqualify (score 0-20): explicit in-person/on-site/relocation requirement, explicit in-country work-authorization requirement, or clearly not a software/AI/data role
-- Otherwise relevant (score 55-100): a remote target role with no disqualifier; give the benefit of the doubt when remoteness or authorization is unstated. Seniority, tech stack, and salary do NOT affect relevance.
+  return `Score each posting for remote software/AI/data fit. Apply the system criteria strictly:
+- Hard disqualify (score 0-20): remote work is not explicitly confirmed; any city/state/country/region presence restriction; any in-person/on-site/hybrid/relocation requirement; explicit in-country work-authorization requirement; or clearly not a software/AI/data role
+- Relevant (score 55-100): explicitly remote target role with no geographic-presence, authorization, or in-person disqualifier. Seniority, tech stack, and salary do NOT affect relevance.
 ${learnedSection}${feedbackSection}
 
 Return JSON: { "results": [{ "postingIndex": number, "job": { "isRelevant": boolean, "score": number (0-100), "roleCategory": string, "fitReason": string (3-5 sentences: 1) state the score and primary reason, 2) cite 2-3 specific duties/requirements pulled directly from the posting that support the decision, 3) call out any hard disqualifier (on-site / work-authorization / not-a-tech-role) or standout positive by name, 4) give a clear final verdict. Be specific to THIS posting — never write generic boilerplate.), "suggestedRegions": string[] (["Worldwide"] for relevant, [] otherwise), "estimatedSalaryRange": string } }] }

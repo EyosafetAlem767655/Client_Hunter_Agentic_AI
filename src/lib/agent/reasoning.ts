@@ -18,6 +18,7 @@ import { memory } from "./memory";
 import { logEvent } from "./observability";
 import { fetchFullDescription, htmlToText } from "@/lib/scrapers/fetch-description";
 import { updateJobPostingDescription } from "@/lib/db/queries";
+import { findRemoteDisqualifier } from "@/lib/llm/remote-eligibility";
 
 export interface FilterRunResult {
   processed: number;
@@ -188,7 +189,18 @@ async function processBatch(
     processed++;
     const posting = postings[j];
     const match = parsed?.results.find((r) => r.postingIndex === j);
-    const job = match?.job ?? FALLBACK_FILTERED;
+    let job = match?.job ?? FALLBACK_FILTERED;
+
+    const remoteDisqualifier = findRemoteDisqualifier(posting);
+    if (remoteDisqualifier) {
+      job = {
+        ...job,
+        isRelevant: false,
+        score: 0,
+        fitReason: remoteDisqualifier,
+        suggestedRegions: [],
+      };
+    }
 
     if (!match) {
       await logEvent("warn", "LLM parse failure for posting", {

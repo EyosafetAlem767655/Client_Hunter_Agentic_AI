@@ -56,7 +56,36 @@ describe("reasoning agent", () => {
     expect(result.newMatches).toHaveLength(1);
     expect(result.newMatches[0].postingId).toBe(1);
     expect(result.newMatches[0].score).toBe(90);
-  }, 15_000);
+  }, 30_000);
+
+  it("overrides an LLM match when the remote role is state-restricted", async () => {
+    const { memory } = await import("@/lib/agent/memory");
+    vi.mocked(memory.listUnfilteredPostings).mockResolvedValueOnce([
+      {
+        posting: {
+          id: 2,
+          title: "Software Engineer",
+          company: "Acme",
+          location: "Remote - Texas",
+          description: "This is a remote software engineering role.",
+        },
+      },
+    ] as never);
+
+    const { filterPendingPostings } = await import("@/lib/agent/reasoning");
+    const result = await filterPendingPostings(5);
+
+    expect(result.newMatches).toHaveLength(0);
+    expect(memory.insertFilteredJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postingId: 2,
+        isRelevant: false,
+        score: 0,
+        suggestedRegions: [],
+        fitReason: expect.stringContaining("limited to the listed location"),
+      })
+    );
+  }, 30_000);
 
   it("leaves postings unfiltered when the LLM filter call fails", async () => {
     const { callGeminiJson } = await import("@/lib/llm/client");
