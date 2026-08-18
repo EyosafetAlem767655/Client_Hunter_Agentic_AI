@@ -6,7 +6,7 @@ import {
 } from "@/lib/db/queries";
 import { fetchFullDescription } from "@/lib/scrapers/fetch-description";
 import { fetchJobDescriptionViaPython } from "@/lib/scrapers/job-description-python";
-import { callOpenAIJson } from "@/lib/llm/client";
+import { callGeminiJson } from "@/lib/llm/client";
 import { env } from "@/lib/env";
 
 export const maxDuration = 60;
@@ -30,8 +30,8 @@ const FORMAT_SYSTEM =
 /** Best-effort LLM cleanup. Falls back to the raw text on any failure. */
 async function formatDescription(raw: string): Promise<string> {
   try {
-    const out = await callOpenAIJson<{ description: string }>({
-      model: env.OPENAI_FILTER_MODEL,
+    const out = await callGeminiJson<{ description: string }>({
+      model: env.GEMINI_MODEL,
       system: FORMAT_SYSTEM,
       user: raw.slice(0, 12_000),
       jsonSchema: FORMAT_SCHEMA,

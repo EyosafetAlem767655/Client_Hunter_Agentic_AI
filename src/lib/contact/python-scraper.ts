@@ -36,7 +36,7 @@ function appBaseUrl(): string {
  * POST a list of URLs to the Python contact-scraper service. The service
  * uses Playwright (when available) or `requests + BeautifulSoup` to load
  * each page and return the rendered text + `mailto:` links. The caller
- * then hands the result to OpenAI for email extraction.
+ * then hands the result to Gemini for email extraction.
  *
  * Falls through with `ok: false` results on any HTTP failure rather than
  * throwing — the discovery loop treats no-emails as "skip" and moves on.

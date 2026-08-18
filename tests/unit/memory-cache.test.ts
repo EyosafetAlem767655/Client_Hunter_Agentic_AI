@@ -24,10 +24,10 @@ describe("memory LLM cache", () => {
     async () => {
       getLlmCache.mockResolvedValue({ response: { ok: true } });
       const { memory } = await import("@/lib/agent/memory");
-      const hit = await memory.getCachedLlm("gpt-4o-mini", "input-hash");
+      const hit = await memory.getCachedLlm("gemini-3.5-flash-lite", "input-hash");
       expect(hit).toEqual({ ok: true });
 
-      await memory.setCachedLlm("gpt-4o-mini", "input-hash", { ok: true });
+      await memory.setCachedLlm("gemini-3.5-flash-lite", "input-hash", { ok: true });
       expect(setLlmCache).toHaveBeenCalled();
     },
     15_000

@@ -14,24 +14,8 @@ export function normalizeEnv(
     source.GMAIL_USER = source.CONTACT_EMAIL;
   }
 
-  if (!source.OPENAI_FILTER_MODEL) {
-    source.OPENAI_FILTER_MODEL = "gpt-4o";
-  }
-
-  if (!source.OPENAI_DRAFT_MODEL) {
-    source.OPENAI_DRAFT_MODEL = "gpt-4o";
-  }
-
-  // Contact-discovery LLM defaults — URL pick + email extraction. These
-  // are separate from OPENAI_FILTER_MODEL (which handles the bulk job
-  // relevance pass on every scraped posting) because contact discovery
-  // needs sharper reasoning than gpt-4o-mini for the same tokens.
-  if (!source.OPENAI_URL_FILTER_MODEL) {
-    source.OPENAI_URL_FILTER_MODEL = "gpt-5.5";
-  }
-
-  if (!source.OPENAI_EMAIL_EXTRACT_MODEL) {
-    source.OPENAI_EMAIL_EXTRACT_MODEL = "gpt-5.5";
+  if (!source.GEMINI_MODEL) {
+    source.GEMINI_MODEL = "gemini-3.5-flash-lite";
   }
 
   if (!source.DRY_RUN) {
@@ -58,11 +42,8 @@ export function normalizeEnv(
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
-  OPENAI_API_KEY: z.string().min(1),
-  OPENAI_FILTER_MODEL: z.string().default("gpt-4o"),
-  OPENAI_DRAFT_MODEL: z.string().default("gpt-4o"),
-  OPENAI_URL_FILTER_MODEL: z.string().default("gpt-5.5"),
-  OPENAI_EMAIL_EXTRACT_MODEL: z.string().default("gpt-5.5"),
+  GEMINI_API_KEY: z.string().min(1),
+  GEMINI_MODEL: z.string().default("gemini-3.5-flash-lite"),
   GMAIL_USER: z.string().email(),
   GMAIL_APP_PASSWORD: z.string().min(16),
   CRON_SECRET: z.string().min(8),
@@ -121,7 +102,7 @@ function loadEnv(): Env {
       const placeholders: Record<string, string> = {
         DATABASE_URL:
           resolveDatabaseUrl(process.env) || "postgres://local/build",
-        OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "sk-build-placeholder",
+        GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? "gemini-build-placeholder",
         GMAIL_USER:
           process.env.GMAIL_USER ??
           process.env.CONTACT_EMAIL ??
@@ -161,7 +142,7 @@ export const env: Env = loadEnv();
 export const CRON_EMAIL_LIMIT = 30;
 export const CRON_POSTING_LIMIT = 150;
 export const DOMAIN_RATE_LIMIT_DAYS = 30;
-// Smaller batches keep individual OpenAI calls fast (<15 s) so the filter
+// Smaller batches keep individual Gemini calls fast (<15 s) so the filter
 // stays inside Vercel's 60 s function ceiling even with one retry.
 export const FILTER_BATCH_SIZE = 8;
 // How many filter / discovery operations to fan out at once. Vercel Hobby has

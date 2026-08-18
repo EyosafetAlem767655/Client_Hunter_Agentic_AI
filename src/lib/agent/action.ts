@@ -6,7 +6,7 @@ import {
 } from "@/lib/contact/discovery";
 import { finalizeEmailBody } from "@/lib/email/templates";
 import { sendEmail } from "@/lib/email/transport";
-import { callOpenAIJson } from "@/lib/llm/client";
+import { callGeminiJson } from "@/lib/llm/client";
 import { buildDraftPrompt, SYSTEM_PROMPT } from "@/lib/llm/prompts";
 import {
   draftedEmailJsonSchema,
@@ -223,13 +223,13 @@ export async function draftEmailsForContacts(
     const inputHash = sha256Hex(
       `${posting.id}:${recipientEmail}:${filtered.fitReason}`
     );
-    const cached = await memory.getCachedLlm(env.OPENAI_DRAFT_MODEL, inputHash);
+    const cached = await memory.getCachedLlm(env.GEMINI_MODEL, inputHash);
     let draft = cached ? parseDraftedEmail(cached) : null;
 
     if (!draft) {
       try {
-        const raw = await callOpenAIJson<unknown>({
-          model: env.OPENAI_DRAFT_MODEL,
+        const raw = await callGeminiJson<unknown>({
+          model: env.GEMINI_MODEL,
           system: SYSTEM_PROMPT,
           user: buildDraftPrompt({
             title: posting.title,
@@ -243,7 +243,7 @@ export async function draftEmailsForContacts(
         draft = parseDraftedEmail(raw);
         if (draft) {
           await memory.setCachedLlm(
-            env.OPENAI_DRAFT_MODEL,
+            env.GEMINI_MODEL,
             inputHash,
             raw as Record<string, unknown>
           );

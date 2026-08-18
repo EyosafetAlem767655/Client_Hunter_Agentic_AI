@@ -113,7 +113,7 @@ export async function runScrapePipelineFromPostings(
           {
             maxBatches: options.filterMaxBatches ?? 2,
             // 20 s timeout × 2 retries fits two batches into the 55 s pipeline
-            // budget; the previous 15 s × 1 retry was failing on slow OpenAI
+            // budget; the previous 15 s × 1 retry was failing on slow Gemini
             // structured-output responses.
             llmTimeoutMs: 20_000,
             llmMaxRetries: 2,

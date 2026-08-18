@@ -14,7 +14,7 @@ describe("PII leakage", () => {
     };
 
     await logEvent("info", "test event", {
-      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY,
       GMAIL_APP_PASSWORD: process.env.GMAIL_APP_PASSWORD,
       safeField: "visible",
     });

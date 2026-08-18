@@ -22,7 +22,7 @@ export function isAnthropicConfigured(): boolean {
 /**
  * Call the Anthropic Messages API and return the concatenated text output.
  * Uses REST directly (no SDK dependency), mirroring the retry/timeout shape of
- * the OpenAI client in llm/client.ts.
+ * the Gemini client in llm/client.ts.
  */
 export async function callClaudeText(params: {
   user: string;

@@ -1,5 +1,5 @@
 import { env, FILTER_BATCH_SIZE, LLM_FILTER_CONCURRENCY } from "@/lib/env";
-import { callOpenAIJson } from "@/lib/llm/client";
+import { callGeminiJson } from "@/lib/llm/client";
 import {
   buildFilterPrompt,
   FeedbackExample,
@@ -133,14 +133,14 @@ async function processBatch(
         }))
       )
   );
-  const cached = await memory.getCachedLlm(env.OPENAI_FILTER_MODEL, inputHash);
+  const cached = await memory.getCachedLlm(env.GEMINI_MODEL, inputHash);
   let parsed = cached ? parseFilteredBatch(cached) : null;
   let llmFailed = false;
 
   if (!parsed) {
     try {
-      const raw = await callOpenAIJson<unknown>({
-        model: env.OPENAI_FILTER_MODEL,
+      const raw = await callGeminiJson<unknown>({
+        model: env.GEMINI_MODEL,
         system: SYSTEM_PROMPT,
         user: buildFilterPrompt(
           postings.map((p) => ({
@@ -159,7 +159,7 @@ async function processBatch(
       parsed = parseFilteredBatch(raw);
       if (parsed) {
         await memory.setCachedLlm(
-          env.OPENAI_FILTER_MODEL,
+          env.GEMINI_MODEL,
           inputHash,
           raw as Record<string, unknown>
         );
@@ -204,7 +204,7 @@ async function processBatch(
       fitReason: job.fitReason,
       suggestedRegions: job.suggestedRegions,
       estimatedSalaryRange: job.estimatedSalaryRange,
-      llmModel: env.OPENAI_FILTER_MODEL,
+      llmModel: env.GEMINI_MODEL,
       promptVersion: PROMPT_VERSION,
     });
     succeeded++;
@@ -275,7 +275,7 @@ export async function filterPendingPostings(
   const outcomes: BatchOutcome[] = [];
 
   if (delayMs > 0 || (options.concurrency ?? LLM_FILTER_CONCURRENCY) === 1) {
-    // Sequential with optional rate-limit delay between OpenAI calls
+    // Sequential with optional rate-limit delay between Gemini calls
     for (let i = 0; i < selectedBatches.length; i++) {
       if (i > 0 && delayMs > 0) await sleep(delayMs);
       outcomes.push(await processBatch(selectedBatches[i], options, feedbackExamples as FeedbackExample[], learnedRules));

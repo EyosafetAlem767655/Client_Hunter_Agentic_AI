@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/llm/client", () => ({
-  callOpenAIJson: vi.fn().mockResolvedValue({
+  callGeminiJson: vi.fn().mockResolvedValue({
     results: [
       {
         postingIndex: 0,
@@ -59,9 +59,9 @@ describe("reasoning agent", () => {
   }, 15_000);
 
   it("leaves postings unfiltered when the LLM filter call fails", async () => {
-    const { callOpenAIJson } = await import("@/lib/llm/client");
+    const { callGeminiJson } = await import("@/lib/llm/client");
     const { memory } = await import("@/lib/agent/memory");
-    vi.mocked(callOpenAIJson).mockRejectedValueOnce(new Error("timeout"));
+    vi.mocked(callGeminiJson).mockRejectedValueOnce(new Error("timeout"));
 
     const { filterPendingPostings } = await import("@/lib/agent/reasoning");
     const result = await filterPendingPostings(5, {

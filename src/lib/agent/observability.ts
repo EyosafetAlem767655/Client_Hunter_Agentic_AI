@@ -38,7 +38,7 @@ function redactSecrets(
   context: Record<string, unknown>
 ): Record<string, unknown> {
   const sensitive = [
-    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
     "GMAIL_APP_PASSWORD",
     "DATABASE_URL",
     "ADMIN_TOKEN",

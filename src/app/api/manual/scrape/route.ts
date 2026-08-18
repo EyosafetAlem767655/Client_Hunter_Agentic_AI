@@ -38,7 +38,7 @@ export async function POST(request: Request) {
         ok: false,
         error: message,
         hint:
-          "Pipeline threw before completing. Check Vercel function logs for the stack trace. Common causes: missing env vars (OPENAI_API_KEY, DATABASE_URL, GMAIL_APP_PASSWORD) or Neon connection limit reached.",
+          "Pipeline threw before completing. Check Vercel function logs for the stack trace. Common causes: missing env vars (GEMINI_API_KEY, DATABASE_URL, GMAIL_APP_PASSWORD) or Neon connection limit reached.",
       },
       { status: 200 }
     );

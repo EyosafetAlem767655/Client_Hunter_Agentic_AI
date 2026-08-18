@@ -9,7 +9,7 @@ the right outreach email:
   - a flag telling the caller whether we used Playwright (JS-rendered DOM)
     or fell back to plain `requests` (server-side HTML only)
 
-The caller hands the bundle to OpenAI,
+The caller hands the bundle to Gemini,
 which extracts the best email. No regex parsing happens here.
 
 Playwright is preferred — many marketing sites JS-render their contact
@@ -129,7 +129,7 @@ def _extract_with_requests(url: str) -> dict[str, Any]:
 
     return {
         "url": url,
-        "text": text[:20_000],  # OpenAI context cap
+        "text": text[:20_000],  # Keep downstream Gemini prompts bounded
         "mailtos": list(dict.fromkeys(mailtos))[:50],
         "elements": elements,
         "engine": "requests",

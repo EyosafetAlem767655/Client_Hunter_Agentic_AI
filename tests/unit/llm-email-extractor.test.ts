@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScrapedContactPage } from "@/lib/contact/python-scraper";
 
 const llmMocks = vi.hoisted(() => ({
-  callOpenAIJson: vi.fn(),
+  callGeminiJson: vi.fn(),
 }));
 
 vi.mock("@/lib/llm/client", () => ({
-  callOpenAIJson: llmMocks.callOpenAIJson,
+  callGeminiJson: llmMocks.callGeminiJson,
 }));
 
 vi.mock("@/lib/agent/observability", () => ({
@@ -122,11 +122,11 @@ describe("extractEmailsFromPages — only sends @ snippets to LLM", () => {
       page({ text: "Contact form only — no email visible." }),
     ]);
     expect(out).toEqual([]);
-    expect(llmMocks.callOpenAIJson).not.toHaveBeenCalled();
+    expect(llmMocks.callGeminiJson).not.toHaveBeenCalled();
   });
 
   it("sends only @-containing snippets, then validates LLM picks against the regex set", async () => {
-    llmMocks.callOpenAIJson.mockResolvedValue({
+    llmMocks.callGeminiJson.mockResolvedValue({
       primary: "hr@acme.com",
       alternates: ["hello@acme.com"],
     });
@@ -140,8 +140,8 @@ describe("extractEmailsFromPages — only sends @ snippets to LLM", () => {
       }),
     ]);
 
-    expect(llmMocks.callOpenAIJson).toHaveBeenCalledTimes(1);
-    const call = llmMocks.callOpenAIJson.mock.calls[0][0];
+    expect(llmMocks.callGeminiJson).toHaveBeenCalledTimes(1);
+    const call = llmMocks.callGeminiJson.mock.calls[0][0];
     // Prompt mentions @-containing sentences.
     expect(call.user).toContain("hr@acme.com");
     // But NOT unrelated sentences.
@@ -152,7 +152,7 @@ describe("extractEmailsFromPages — only sends @ snippets to LLM", () => {
   });
 
   it("rejects an LLM-invented email and falls back to the regex set", async () => {
-    llmMocks.callOpenAIJson.mockResolvedValue({
+    llmMocks.callGeminiJson.mockResolvedValue({
       primary: "phisher@evil.test",
       alternates: [],
     });
@@ -170,7 +170,7 @@ describe("extractEmailsFromPages — only sends @ snippets to LLM", () => {
   });
 
   it("returns regex-matched emails when the LLM call throws", async () => {
-    llmMocks.callOpenAIJson.mockRejectedValue(new Error("OpenAI timeout"));
+    llmMocks.callGeminiJson.mockRejectedValue(new Error("Gemini timeout"));
     const { extractEmailsFromPages } = await import(
       "@/lib/contact/llm-email-extractor"
     );

@@ -40,11 +40,11 @@ describe("fallbackContactUrls", () => {
 });
 
 const llmMocks = vi.hoisted(() => ({
-  callOpenAIJson: vi.fn(),
+  callGeminiJson: vi.fn(),
 }));
 
 vi.mock("@/lib/llm/client", () => ({
-  callOpenAIJson: llmMocks.callOpenAIJson,
+  callGeminiJson: llmMocks.callGeminiJson,
 }));
 
 vi.mock("@/lib/agent/observability", () => ({
@@ -72,11 +72,11 @@ describe("filterContactUrls — keyword pre-filter + hallucination guard", () =>
         summary: "",
       },
     ]);
-    expect(llmMocks.callOpenAIJson).not.toHaveBeenCalled();
+    expect(llmMocks.callGeminiJson).not.toHaveBeenCalled();
   });
 
   it("only sends keyword-matching candidates to the LLM", async () => {
-    llmMocks.callOpenAIJson.mockResolvedValue({
+    llmMocks.callGeminiJson.mockResolvedValue({
       url: "https://acme.com/contact",
     });
     const { filterContactUrls } = await import("@/lib/contact/url-filter");
@@ -98,14 +98,14 @@ describe("filterContactUrls — keyword pre-filter + hallucination guard", () =>
       },
     ]);
 
-    expect(llmMocks.callOpenAIJson).toHaveBeenCalledTimes(1);
-    const call = llmMocks.callOpenAIJson.mock.calls[0][0];
+    expect(llmMocks.callGeminiJson).toHaveBeenCalledTimes(1);
+    const call = llmMocks.callGeminiJson.mock.calls[0][0];
     expect(call.user).toContain("https://acme.com/contact");
     expect(call.user).not.toContain("https://acme.com/reports/2025");
   });
 
   it("rejects an LLM-invented URL that wasn't in the allowed set", async () => {
-    llmMocks.callOpenAIJson.mockResolvedValue({
+    llmMocks.callGeminiJson.mockResolvedValue({
       url: "https://attacker.example/phishing",
     });
     const { filterContactUrls } = await import("@/lib/contact/url-filter");
@@ -125,7 +125,7 @@ describe("filterContactUrls — keyword pre-filter + hallucination guard", () =>
   });
 
   it("returns the LLM pick when it is in the allowed set", async () => {
-    llmMocks.callOpenAIJson.mockResolvedValue({
+    llmMocks.callGeminiJson.mockResolvedValue({
       url: "https://acme.com/contact",
     });
     const { filterContactUrls } = await import("@/lib/contact/url-filter");

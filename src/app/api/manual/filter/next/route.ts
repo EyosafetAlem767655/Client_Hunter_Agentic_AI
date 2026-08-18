@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   }
 
   const url = new URL(request.url);
-  // 8 jobs per batch keeps each OpenAI call small and well under the 60 s limit.
+  // 8 jobs per batch keeps each Gemini call small and well under the 60 s limit.
   // The UI loops this endpoint until done:true so all scraped jobs get processed.
   const n = Math.max(1, Math.min(24, Number(url.searchParams.get("n") ?? 8)));
   // Optional source scope — clicking "Indeed" filters only Indeed jobs.
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
         ok: false,
         error: error instanceof Error ? error.message : String(error),
         hint:
-          "Ensure OPENAI_API_KEY is set in Vercel Environment Variables. The filter sends jobs to GPT-4o-mini in small batches.",
+          "Ensure GEMINI_API_KEY is set in Vercel Environment Variables. The filter sends jobs to Gemini Flash-Lite in small batches.",
       },
       { status: 200 }
     );

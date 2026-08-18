@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       {
         ok: false,
         error: e instanceof Error ? e.message : String(e),
-        hint: "Check LangSearch / OpenAI / Neon connectivity and that the contact discovery chain isn't blocked.",
+        hint: "Check LangSearch / Gemini / Neon connectivity and that the contact discovery chain isn't blocked.",
       },
       { status: 200 }
     );

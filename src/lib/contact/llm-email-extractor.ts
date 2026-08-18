@@ -1,5 +1,5 @@
 import { env } from "@/lib/env";
-import { callOpenAIJson } from "@/lib/llm/client";
+import { callGeminiJson } from "@/lib/llm/client";
 import { logEvent } from "@/lib/agent/observability";
 import type { ScrapedContactPage } from "./python-scraper";
 
@@ -165,7 +165,7 @@ function buildUserPrompt(pageSnippets: PageSnippets[]): string {
 }
 
 /**
- * Send the scraped contact-page content to OpenAI and let the model pick
+ * Send the scraped contact-page content to Gemini and let the model pick
  * the right business contact email. Returns primary first, then the
  * model's alternates. Empty list on parse / API failure, OR when no page
  * contained an `@` indicator (skip the LLM entirely — the caller will
@@ -207,8 +207,8 @@ export async function extractEmailsFromPages(
 
   let result: ExtractedEmails;
   try {
-    result = await callOpenAIJson<ExtractedEmails>({
-      model: env.OPENAI_EMAIL_EXTRACT_MODEL,
+    result = await callGeminiJson<ExtractedEmails>({
+      model: env.GEMINI_MODEL,
       system: SYSTEM_PROMPT,
       user: buildUserPrompt(withEmails),
       jsonSchema: SCHEMA as unknown as Record<string, unknown>,
@@ -219,7 +219,7 @@ export async function extractEmailsFromPages(
       error: e instanceof Error ? e.message : String(e),
     });
     // Fallback: if the LLM call fails but we DO have regex-matched
-    // emails, return those — losing them just because OpenAI was slow
+    // emails, return those — losing them just because Gemini was slow
     // would force a url_only fallback when we already know the address.
     return Array.from(allowedEmails);
   }

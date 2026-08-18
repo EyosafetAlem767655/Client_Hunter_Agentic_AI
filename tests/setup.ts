@@ -2,9 +2,8 @@ import "@testing-library/jest-dom/vitest";
 
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ?? "postgres://test:test@localhost:5432/test";
-process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "sk-test-key";
-process.env.OPENAI_FILTER_MODEL = "gpt-4o-mini";
-process.env.OPENAI_DRAFT_MODEL = "gpt-4o";
+process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "gemini-test-key";
+process.env.GEMINI_MODEL = "gemini-3.5-flash-lite";
 process.env.GMAIL_USER = "test@example.com";
 process.env.GMAIL_APP_PASSWORD = "abcdefghijklmnop";
 process.env.CRON_SECRET = "test-cron-secret";

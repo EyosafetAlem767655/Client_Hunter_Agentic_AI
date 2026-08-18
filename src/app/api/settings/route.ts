@@ -15,7 +15,7 @@ export async function GET() {
 
   return NextResponse.json({
     env: {
-      OPENAI_API_KEY: maskSecret(env.OPENAI_API_KEY),
+      GEMINI_API_KEY: maskSecret(env.GEMINI_API_KEY),
       DATABASE_URL: maskSecret(env.DATABASE_URL),
       GMAIL_USER: env.GMAIL_USER,
       GMAIL_APP_PASSWORD: maskSecret(env.GMAIL_APP_PASSWORD),

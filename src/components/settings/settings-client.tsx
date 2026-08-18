@@ -896,7 +896,7 @@ export function SettingsClient({
                 Auto-starting email discovery in {scrapeCountdown}s
               </div>
               <div className="text-xs text-amber-800/80">
-                Lets the LLM filter commits settle before LangSearch/OpenAI
+                Lets the LLM filter commits settle before LangSearch/Gemini
                 contact discovery starts, one company at a time.
               </div>
             </div>
@@ -949,7 +949,7 @@ export function SettingsClient({
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             Walks through every relevant job that still needs a contact and
-            uses LangSearch to retrieve likely contact URLs, then OpenAI
+            uses LangSearch to retrieve likely contact URLs, then Gemini
             filters URLs and extracts emails from scraped contact pages
             one company at a time, with a{" "}
             <strong>30-second rest</strong> between calls. Each request

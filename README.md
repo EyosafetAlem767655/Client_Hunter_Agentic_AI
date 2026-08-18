@@ -1,6 +1,6 @@
 # Talent Bridge Agent
 
-**60-second pitch:** TalentBridge is an autonomous staffing outreach agent. It scrapes US/EU remote job boards daily, uses OpenAI to score fit for a talent-arbitrage model (Philippines, India, Ethiopia at 40–60% of US cost), discovers business contact emails, drafts personalized outreach, and tracks the full pipeline on a live dashboard — deployed on Vercel with Neon Postgres.
+**60-second pitch:** TalentBridge is an autonomous staffing outreach agent. It scrapes US/EU remote job boards daily, uses Gemini to score fit for a talent-arbitrage model (Philippines, India, Ethiopia at 40–60% of US cost), discovers business contact emails, drafts personalized outreach, and tracks the full pipeline on a live dashboard — deployed on Vercel with Neon Postgres.
 
 ## Architecture
 
@@ -30,7 +30,7 @@ flowchart TB
   memory --> neon
 ```
 
-Seven layers: **Perception** (scrapers), **Memory** (DB + LLM cache), **Reasoning** (OpenAI filter), **Planning** (orchestrator), **Action** (discover, draft, send), **Guardrails**, **Observability**.
+Seven layers: **Perception** (scrapers), **Memory** (DB + LLM cache), **Reasoning** (Gemini filter), **Planning** (orchestrator), **Action** (discover, draft, send), **Guardrails**, **Observability**.
 
 ## Local development
 
@@ -39,7 +39,7 @@ git clone <repo>
 cd Job_hunter_agentic_AI
 pnpm install
 cp .env.example .env.local
-# Fill DATABASE_URL (Neon), OPENAI_API_KEY, Gmail app password, secrets
+# Fill DATABASE_URL (Neon), GEMINI_API_KEY, Gmail app password, secrets
 pnpm db:push
 pnpm dev
 ```
@@ -76,7 +76,7 @@ Job scraping runs in **Python** (`scraper/`) for reliability:
 | **Daily automatic** | Vercel cron `GET /api/cron/scrape` at **06:00 UTC** (Hobby: 2 crons max) |
 | **Manual** | Settings → paste `ADMIN_TOKEN` → **Run scrape now** |
 
-Flow: cron/manual → Node orchestrator → **Python** (`/api/py/scrape` on Vercel) → ingest → OpenAI filter → contact discovery.
+Flow: cron/manual → Node orchestrator → **Python** (`/api/py/scrape` on Vercel) → ingest → Gemini filter → contact discovery.
 
 Local manual scrape: `python scraper/run.py --limit 50` (requires `pip install -r scraper/requirements.txt`).
 
@@ -116,8 +116,8 @@ Optional GitHub Actions backup (`.github/workflows/scrape-python.yml`): set repo
 
 | Step | Model | Approx. tokens | Est. cost |
 |------|--------|----------------|-----------|
-| Filter (200 batches × 5) | gpt-4o-mini | ~2M in / 400k out | ~$0.50–$1.50 |
-| Draft (~200 emails) | gpt-4o | ~400k in / 200k out | ~$3–$8 |
+| Filter (200 batches × 5) | Gemini 3.5 Flash-Lite | ~2M in / 400k out | Free within API quota |
+| Draft (~200 emails) | Gemini 3.5 Flash-Lite | ~400k in / 200k out | Free within API quota |
 
 Highly dependent on description length and cache hit rate (`llm_cache` table).
 

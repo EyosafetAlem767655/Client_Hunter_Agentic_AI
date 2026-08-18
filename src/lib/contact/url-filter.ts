@@ -1,4 +1,4 @@
-import { callOpenAIJson } from "@/lib/llm/client";
+import { callGeminiJson } from "@/lib/llm/client";
 import { env } from "@/lib/env";
 import { logEvent } from "@/lib/agent/observability";
 import type { LangSearchUrlResult } from "@/lib/langsearch/client";
@@ -102,8 +102,8 @@ export async function filterContactUrls(
   // sentences that contain the keyword indicators so the model can't
   // wander off into URLs we don't trust.
   try {
-    const result = await callOpenAIJson<UrlFilterResult>({
-      model: env.OPENAI_URL_FILTER_MODEL,
+    const result = await callGeminiJson<UrlFilterResult>({
+      model: env.GEMINI_MODEL,
       system: SYSTEM_PROMPT,
       user: buildUserPrompt(company, keywordHits),
       jsonSchema: SCHEMA as unknown as Record<string, unknown>,

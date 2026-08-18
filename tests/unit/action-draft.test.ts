@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/llm/client", () => ({
-  callOpenAIJson: vi.fn().mockResolvedValue({
+  callGeminiJson: vi.fn().mockResolvedValue({
     subject: "Talent partnership",
     body: "Hello from TalentBridge. " + "x".repeat(120),
   }),

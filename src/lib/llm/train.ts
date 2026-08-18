@@ -1,5 +1,5 @@
 import { listAllFeedback, setSetting } from "@/lib/db/queries";
-import { callOpenAIJson } from "@/lib/llm/client";
+import { callGeminiJson } from "@/lib/llm/client";
 import { buildTrainPrompt } from "@/lib/llm/prompts";
 import { env } from "@/lib/env";
 
@@ -25,8 +25,8 @@ const TRAIN_JSON_SCHEMA = {
 export async function runTrainingOnFeedback(
   feedback: Awaited<ReturnType<typeof listAllFeedback>>
 ): Promise<TrainResult> {
-  return callOpenAIJson<TrainResult>({
-    model: env.OPENAI_FILTER_MODEL,
+  return callGeminiJson<TrainResult>({
+    model: env.GEMINI_MODEL,
     system:
       "You analyze job filter feedback to extract specific, actionable new filtering rules. Be concrete.",
     user: buildTrainPrompt(feedback),
