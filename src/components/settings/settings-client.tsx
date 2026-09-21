@@ -69,6 +69,7 @@ export function SettingsClient({
 }) {
   const [settings, setSettings] = useState(initial);
   const [token, setToken] = useState("");
+  const [localMode, setLocalMode] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(
     null
@@ -125,6 +126,12 @@ export function SettingsClient({
 
   // Restore token + scrape results from sessionStorage on mount
   useEffect(() => {
+    setLocalMode(
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1" ||
+        window.location.hostname === "::1" ||
+        window.location.hostname === "[::1]"
+    );
     const saved = sessionStorage.getItem(TOKEN_KEY);
     if (saved) setToken(saved);
     try {
@@ -141,6 +148,8 @@ export function SettingsClient({
       // ignore corrupt storage
     }
   }, []);
+
+  const hasAdminAccess = localMode || Boolean(token.trim());
 
   // Persist scrape state so results survive tab navigation
   useEffect(() => {
@@ -530,7 +539,7 @@ export function SettingsClient({
     position: JobPosition,
     country: ScrapeCountry
   ) {
-    if (!token.trim()) {
+    if (!hasAdminAccess) {
       showToast("err", "Unauthorized — enter ADMIN_TOKEN first.");
       return;
     }
@@ -583,7 +592,12 @@ export function SettingsClient({
           error: data.error,
         },
       }));
-      if (ok) {
+      if (ok && source === "indeed" && (data.count ?? 0) === 0) {
+        showToast(
+          "ok",
+          `${country.label} · ${position.label}: check cleared — no new Indeed jobs in the last 24h — filtering…`
+        );
+      } else if (ok) {
         showToast("ok", `${country.label} · ${position.label}: ${data.count ?? 0} found, ${data.inserted ?? 0} new — filtering…`);
       } else {
         showToast("err", `${country.label} · ${position.label} failed: ${data.error ?? "Unknown error"}`);
@@ -1088,7 +1102,7 @@ export function SettingsClient({
                         return (
                           <button
                             key={key}
-                            disabled={!token.trim() || busy || loading !== null}
+                            disabled={!hasAdminAccess || busy || loading !== null}
                             onClick={() => void scrapeOnePosition(source, position, country)}
                             className="flex flex-col items-start gap-1 rounded-lg border border-primary/20 bg-background/50 p-2.5 text-left hover:bg-primary/5 disabled:opacity-40 transition-colors"
                           >

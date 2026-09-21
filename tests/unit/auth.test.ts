@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { verifyCronAuth, verifyManualAuth, verifyWorkerAuth } from "@/lib/auth";
 
-function request(headers: Record<string, string>): Request {
-  return new Request("http://localhost/api/cron/scrape", { headers });
+function request(
+  headers: Record<string, string>,
+  url = "http://localhost/api/cron/scrape"
+): Request {
+  return new Request(url, { headers });
 }
 
 describe("auth", () => {
@@ -41,6 +44,20 @@ describe("auth", () => {
 
   it("rejects missing auth", () => {
     expect(verifyManualAuth(request({}))).toBe(false);
+  });
+
+  it("allows missing auth only for loopback requests in development", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL", "");
+    expect(verifyManualAuth(request({}))).toBe(true);
+    expect(
+      verifyManualAuth(
+        request({}, "http://192.168.1.20/api/manual/scrape/source")
+      )
+    ).toBe(false);
+    vi.stubEnv("VERCEL", "1");
+    expect(verifyManualAuth(request({}))).toBe(false);
+    vi.unstubAllEnvs();
   });
 
   it("accepts ADMIN_TOKEN for a local worker", () => {

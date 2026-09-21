@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 
@@ -923,6 +924,17 @@ _INDEED_CARDS = ".job_seen_beacon, [data-testid='slider_item']"
 # Page-title markers for Cloudflare's interstitial / block page.
 _INDEED_CHALLENGE_TITLES = ("just a moment", "moment", "verify", "verifying", "human", "blocked", "attention")
 
+# Why the last Indeed run returned what it did. Surfaced as `reason` in the JSON
+# so the dashboard can tell "the check never cleared" from "cleared, 0 new jobs"
+# from "no browser could open". Values: ok | challenge_not_cleared | no_results
+# | browser_failed | skipped.
+_INDEED_STATUS: dict[str, Any] = {"reason": "skipped", "cleared": False}
+
+
+def _set_indeed_status(reason: str, cleared: bool) -> None:
+    _INDEED_STATUS["reason"] = reason
+    _INDEED_STATUS["cleared"] = cleared
+
 
 def _page_html(page, attempts: int = 5) -> str:
     """page.content() throws while the challenge page is mid-redirect. Retry."""
@@ -992,7 +1004,13 @@ def scrape_indeed_playwright(
         #   * _STEALTH_JS — patching navigator.webdriver is itself detectable.
         #   * --no-sandbox / --disable-dev-shm-usage — classic automation flags.
         # A stock Chromium, left alone, clears the check on its own in ~15s.
-        ctx = _launch_indeed_context(p)
+        try:
+            ctx = _launch_indeed_context(p)
+        except Exception as exc:
+            _set_indeed_status("browser_failed", cleared=False)
+            raise RuntimeError(str(exc)) from exc
+        cleared_any = False
+        stuck_on_challenge = False
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
 
@@ -1002,15 +1020,33 @@ def scrape_indeed_playwright(
                 try:
                     page.goto(_indeed_url(q, query), wait_until="domcontentloaded", timeout=30_000)
                     if not _wait_for_indeed_results(page, verify_wait):
-                        _log(f"Indeed: no results for {q!r} within {verify_wait}s (title: {page.title()[:40]!r})")
+                        title = _safe_title(page)
+                        if _indeed_on_challenge(page):
+                            stuck_on_challenge = True
+                        _log(f"Indeed: no results for {q!r} within {verify_wait}s (title: {title[:40]!r})")
                         continue
+                    cleared_any = True
                     jobs.extend(_parse_indeed_page(_page_html(page), seen))
                 except Exception:
                     # This query didn't come through; the next one may still.
-                    _log(f"Indeed: error scraping {q!r} (title: {page.title()[:40]!r})")
+                    _log(f"Indeed: error scraping {q!r} (title: {_safe_title(page)[:40]!r})")
         finally:
             ctx.close()
+
+    if jobs:
+        _set_indeed_status("ok", cleared=True)
+    elif stuck_on_challenge and not cleared_any:
+        _set_indeed_status("challenge_not_cleared", cleared=False)
+    else:
+        _set_indeed_status("no_results", cleared=cleared_any)
     return jobs
+
+
+def _safe_title(page) -> str:
+    try:
+        return page.title() or ""
+    except Exception:
+        return ""
 
 
 def _wait_for_indeed_results(page, verify_wait: int) -> bool:
@@ -1023,12 +1059,14 @@ def _wait_for_indeed_results(page, verify_wait: int) -> bool:
     keeps the clearance cookie, so later roles in the same run go straight through.
     """
     if _indeed_has_cards(page):
+        _log("Indeed: results already on the page (no check)")
         return True
 
     prompted = False
-    waited = 0
-    while waited < verify_wait:
+    started = time.monotonic()
+    while time.monotonic() - started < verify_wait:
         if _indeed_has_cards(page):
+            _log(f"Indeed: check cleared after {time.monotonic() - started:.1f}s")
             return True
         if not prompted and _indeed_on_challenge(page):
             _log(
@@ -1040,10 +1078,12 @@ def _wait_for_indeed_results(page, verify_wait: int) -> bool:
                 "============================================================"
             )
             prompted = True
-        page.wait_for_timeout(1000)
-        waited += 1
+        page.wait_for_timeout(500)
 
-    return _indeed_has_cards(page)
+    if _indeed_has_cards(page):
+        _log(f"Indeed: check cleared after {time.monotonic() - started:.1f}s")
+        return True
+    return False
 
 
 def scrape_indeed(limit: int = 200, query: str | None = None) -> tuple[list[dict[str, Any]], str]:
@@ -1069,11 +1109,15 @@ def scrape_indeed(limit: int = 200, query: str | None = None) -> tuple[list[dict
                 return [], "playwright"
             except Exception as exc:
                 _log(f"Indeed: browser launch/scrape failed: {exc}")
+                _set_indeed_status("browser_failed", cleared=False)
                 return [], "playwright"
         else:
             _log("Indeed: Playwright is not installed for this Python interpreter")
+            _set_indeed_status("browser_failed", cleared=False)
+            return [], "playwright"
 
     jobs = scrape_indeed_requests(limit, query)
+    _set_indeed_status("ok" if jobs else "no_results", cleared=bool(jobs))
     return (jobs, "requests") if jobs else ([], "none")
 
 
@@ -1098,6 +1142,15 @@ def scrape_source(
         # Indeed is USA-only (needs a local browser for Cloudflare); location is ignored.
         return scrape_indeed(query=query)
     return [], "none"
+
+
+def _result_payload(source: str, jobs: list[dict[str, Any]], engine: str) -> dict[str, Any]:
+    """The JSON both entry-points emit. Indeed adds `reason` (see _INDEED_STATUS)."""
+    payload: dict[str, Any] = {"ok": True, "jobs": jobs, "engine": engine, "count": len(jobs)}
+    if source == "indeed":
+        payload["reason"] = _INDEED_STATUS["reason"]
+        payload["cleared"] = _INDEED_STATUS["cleared"]
+    return payload
 
 
 # ── Vercel handler ─────────────────────────────────────────────────────────────
@@ -1125,7 +1178,7 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             jobs, engine = scrape_source(source, query, location)
-            self._respond(200, {"ok": True, "jobs": jobs, "engine": engine, "count": len(jobs)})
+            self._respond(200, _result_payload(source, jobs, engine))
         except Exception as exc:
             self._respond(500, {"ok": False, "error": str(exc)[:300]})
 
@@ -1149,7 +1202,7 @@ if __name__ == "__main__":
         sys.exit(1)
     try:
         found, eng = scrape_source(src, cli_query, cli_location)
-        print(json.dumps({"ok": True, "jobs": found, "engine": eng, "count": len(found)}))
+        print(json.dumps(_result_payload(src, found, eng)))
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)[:300]}))
         sys.exit(1)

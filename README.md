@@ -80,6 +80,44 @@ Flow: cron/manual → Node orchestrator → **Python** (`/api/py/scrape` on Verc
 
 Local manual scrape: `python scraper/run.py --limit 50` (requires `pip install -r scraper/requirements.txt`).
 
+### Indeed from local `npm run dev` (recommended)
+
+Indeed sits behind a Cloudflare "I am not a robot" check that only clears in a
+real, on-screen browser, so Indeed scrapes run **on your PC**. The results go
+into the same Neon database the deployed app reads, so they show up on the
+webapp immediately.
+
+Prerequisites (once):
+
+```powershell
+python -m pip install -r api/py/requirements.txt   # playwright, bs4, curl_cffi
+python -m playwright install chromium                # only if no Chrome/Edge is installed
+```
+
+`.env.local` needs at least `DATABASE_URL`, `ADMIN_TOKEN`, `GEMINI_API_KEY`
+(the dev server refuses to boot without the Gemini key; `vercel env pull` fetches
+it if it is set in Vercel).
+
+Then:
+
+1. `npm run dev` and open <http://localhost:3000/settings>, paste `ADMIN_TOKEN`.
+2. Under **USA → Indeed**, click a role. A Chrome window opens on the Indeed
+   search for that role.
+3. If Indeed asks you to verify, complete the check in that window — you have
+   **15 seconds** (`INDEED_VERIFY_WAIT`). Scraping starts the moment the job
+   cards appear; the window closes on its own.
+4. The jobs are inserted, then the Gemini relevance filter runs and the toast
+   reports how many are relevant. Progress lines from the scraper are printed in
+   the `npm run dev` terminal as `[scrape:indeed] …`.
+
+The Chrome profile lives in `.playwright/indeed` and keeps the Cloudflare
+clearance cookie, so later clicks usually skip the check entirely.
+
+Knobs (all optional, in `.env.local`): `INDEED_VERIFY_WAIT` (seconds for the
+human check, default 15), `INDEED_SCRAPE_TIMEOUT_MS` (whole-run budget, default
+90000), `INDEED_BROWSER_PATH` (explicit browser executable), `PYTHON` (interpreter
+to spawn, default `python`).
+
 ### Indeed local browser worker for Vercel
 
 Vercel cannot open a browser on your computer, so Indeed button clicks are

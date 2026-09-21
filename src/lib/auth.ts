@@ -6,6 +6,24 @@ function bearerToken(request: Request): string | null {
   return auth.slice("Bearer ".length).trim();
 }
 
+/** Allow tokenless manual actions only from this machine during local dev. */
+export function isLocalDevelopmentRequest(request: Request): boolean {
+  if (process.env.NODE_ENV !== "development" || process.env.VERCEL === "1") {
+    return false;
+  }
+  try {
+    const hostname = new URL(request.url).hostname.toLowerCase();
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "[::1]"
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Vercel sets x-vercel-cron: 1 on scheduled invocations. */
 function isVercelCron(request: Request): boolean {
   return (
@@ -24,6 +42,8 @@ export function verifyCronAuth(request: Request): boolean {
 }
 
 export function verifyAdminAuth(request: Request): boolean {
+  if (isLocalDevelopmentRequest(request)) return true;
+
   const token = bearerToken(request);
   if (!token) return false;
 
