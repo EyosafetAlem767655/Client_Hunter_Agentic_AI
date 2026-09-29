@@ -552,7 +552,7 @@ export function SettingsClient({
       if (source === "indeed") {
         showToast(
           "ok",
-          `${country.label} · ${position.label}: opening Indeed — complete the checker in the browser tab within 15 seconds…`
+          `${country.label} · ${position.label}: opening Indeed — complete the checker in the browser tab within 30 seconds…`
         );
       }
       const res = await fetch("/api/manual/scrape/source", {
@@ -1090,7 +1090,7 @@ export function SettingsClient({
                       <span className="text-sm font-medium">{jobSourceLabel(source)}</span>
                       {source === "indeed" && (
                         <span className="text-xs text-amber-700/80">
-                          opens a browser tab · complete the checker within 15 seconds · local only
+                          opens a browser tab · complete the checker within 30 seconds · local only
                         </span>
                       )}
                     </div>

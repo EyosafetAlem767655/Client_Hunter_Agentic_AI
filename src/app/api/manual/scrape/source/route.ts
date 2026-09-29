@@ -30,7 +30,7 @@ interface SubprocessResult {
 
 // Indeed opens a real browser and waits for a human to clear an "I am not a
 // robot" check: Chrome launch (up to 15s per candidate) + page load (up to 30s)
-// + the 15s verify window. This path only runs locally, so there is no
+// + the 30s verify window. This path only runs locally, so there is no
 // serverless ceiling to respect — give it room instead of racing it.
 const INDEED_SUBPROCESS_TIMEOUT_MS = (() => {
   const n = Number(process.env.INDEED_SCRAPE_TIMEOUT_MS);

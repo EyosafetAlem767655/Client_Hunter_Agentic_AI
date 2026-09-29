@@ -104,7 +104,7 @@ Then:
 2. Under **USA → Indeed**, click a role. A Chrome window opens on the Indeed
    search for that role.
 3. If Indeed asks you to verify, complete the check in that window — you have
-   **15 seconds** (`INDEED_VERIFY_WAIT`). Scraping starts the moment the job
+   **30 seconds** (`INDEED_VERIFY_WAIT`). Scraping starts the moment the job
    cards appear; the window closes on its own.
 4. The jobs are inserted, then the Gemini relevance filter runs and the toast
    reports how many are relevant. Progress lines from the scraper are printed in

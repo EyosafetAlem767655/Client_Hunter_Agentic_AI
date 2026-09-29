@@ -914,9 +914,9 @@ window.chrome={runtime:{}};
 # runs, so a challenge cleared once isn't re-armed on every scrape.
 _INDEED_PROFILE_DIR = os.path.join(os.getcwd(), ".playwright", "indeed")
 
-# The visible browser gives the user 15 seconds to clear Indeed's checker. Keep
+# The visible browser gives the user 30 seconds to clear Indeed's checker. Keep
 # this short so a failed check returns control to the local dashboard promptly.
-_INDEED_VERIFY_WAIT = int(os.environ.get("INDEED_VERIFY_WAIT", "15"))
+_INDEED_VERIFY_WAIT = int(os.environ.get("INDEED_VERIFY_WAIT", "30"))
 
 # Job cards. Their presence is what tells us the challenge is behind us.
 _INDEED_CARDS = ".job_seen_beacon, [data-testid='slider_item']"
@@ -982,7 +982,7 @@ def scrape_indeed_playwright(
         an 8s budget it gave up ~5s before the page was ever going to be ready.
         Waiting on the job-card selector instead rides out the redirects.
 
-    The browser tab stays visible for 15 seconds. If Cloudflare escalates to a
+    The browser tab stays visible for 30 seconds. If Cloudflare escalates to a
     click-through, the user can solve it there before scraping begins.
     """
     queries = _indeed_queries(query) if query else [
